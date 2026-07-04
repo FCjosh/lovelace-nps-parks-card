@@ -4938,6 +4938,22 @@ var NPSParksCard = class extends HTMLElement {
     const height = renderedHeight || 420 * (SVG_H / SVG_W);
     return Math.max(1, Math.round(height / 50));
   }
+  static getConfigForm() {
+    return {
+      schema: [
+        { name: "visited_icon", selector: { icon: {} } },
+        { name: "visited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
+        { name: "visited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
+        { name: "visited_color", selector: { text: { type: "color" } } },
+        { name: "unvisited_icon", selector: { icon: {} } },
+        { name: "unvisited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
+        { name: "unvisited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
+        { name: "unvisited_color", selector: { text: { type: "color" } } },
+        { name: "background_color", selector: { text: {} } },
+        { name: "show_background", selector: { boolean: { type: "color" } } }
+      ]
+    };
+  }
 };
 if (!customElements.get("nps-parks-card")) {
   customElements.define("nps-parks-card", NPSParksCard);
