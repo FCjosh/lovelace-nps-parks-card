@@ -49,7 +49,7 @@ one entity per site to track. You'll need that integration installed first
 ### This card, via HACS (recommended)
 
 2. In HACS, go to **Frontend** → the **⋮** menu → **Custom repositories**.
-3. Add this repository's URL, category **Lovelace**.
+3. Add this repository's URL, category **Dashboard**.
 4. Install **NPS Parks Card**, then hard-refresh your browser.
 
 ### This card, manually
