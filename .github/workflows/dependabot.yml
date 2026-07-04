@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Keeps the actions used in .github/workflows/ current (e.g.
+  # actions/checkout, hacs/action).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Tracks the bundled runtime dependencies (d3-geo, d3-selection,
+  # topojson-client, geo-albers-usa-territories) declared in package.json.
+  # Note: geo-albers-usa-territories pins a peer dependency on d3-geo@^2 —
+  # if Dependabot ever opens a PR bumping d3-geo to a 3.x major version,
+  # run `npm install` locally first and confirm it doesn't fail with an
+  # ERESOLVE peer-dependency conflict before merging (it did when this was
+  # last checked).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"

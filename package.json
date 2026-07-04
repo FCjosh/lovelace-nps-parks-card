@@ -1,0 +1,25 @@
+{
+  "name": "nps-parks-card",
+  "version": "1.0.0",
+  "description": "A Lovelace card for Home Assistant that tracks visited National Park Service sites on an interactive map.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FCjosh/lovelace-nps-parks-card.git"
+  },
+  "scripts": {
+    "build": "esbuild src/nps-parks-card.js --bundle --outfile=dist/nps-parks-card.js --format=esm",
+    "watch": "npm run build -- --watch"
+  },
+  "dependencies": {
+    "d3-geo": "^2.0.1",
+    "d3-selection": "^3.0.0",
+    "geo-albers-usa-territories": "^0.1.0",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

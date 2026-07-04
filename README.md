@@ -115,6 +115,33 @@ type: custom:nps-parks-card
 show_background: false
 ```
 
+## Development
+ 
+The card is bundled from source with [esbuild](https://esbuild.github.io/) —
+`dist/nps-parks-card.js` (what actually ships and what HACS installs) is a
+generated file, not hand-edited directly.
+ 
+```bash
+git clone https://github.com/FCjosh/lovelace-nps-parks-card.git
+cd nps-parks-card
+npm install
+```
+ 
+Edit `src/nps-parks-card.js`, then:
+ 
+```bash
+npm run build          # one-off build
+npm run watch          # rebuilds on every save
+```
+ 
+Commit both your `src/` change and the resulting `dist/nps-parks-card.js`
+together.
+ 
+`d3-geo` is pinned to `^2.0.1` — `geo-albers-usa-territories` declares that
+as a peer dependency, and installing `d3-geo@3.x` alongside it fails with an
+`ERESOLVE` conflict rather than warning. Don't bump it to a 3.x major
+version without confirming compatibility first.
+
 ## Known limitations
 
 - Territories with widely separated park units (e.g. American Samoa's
