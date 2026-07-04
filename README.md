@@ -14,20 +14,9 @@ one entity per site to track. You'll need that integration installed first
 
 ## Screenshots
 
-<!--
-  Add screenshots to an `images/` folder in this repo, then reference them
-  here with relative paths, e.g.:
-
-  ![Map overview](images/map-overview.png)
-
-  For side-by-side or sized images, GitHub also renders inline HTML:
-
-  <img src="images/map-overview.png" width="600" alt="Map overview">
--->
-
-  <img src="images/nps-parks-card.png" width="600" alt="Map overview">
-  <img src="images/pop-up-scroll.png" width="600" alt="Park pop-up">
-  <img src="images/menu-search.png" width="600" alt="Menu search">
+![Map overview](images/nps-parks-card.png)
+![Park pop-up](images/pop-up-scroll.png)
+![Menu search](images/menu-search.png)
 
 ## Features
 
