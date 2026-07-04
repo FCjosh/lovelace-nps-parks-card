@@ -15,7 +15,9 @@ one entity per site to track. You'll need that integration installed first
 ## Screenshots
 
 ![Map overview](images/nps-parks-card.png)
+
 ![Park pop-up](images/pop-up-scroll.png)
+
 ![Menu search](images/menu-search.png)
 
 ## Features
