@@ -36,6 +36,170 @@ const US_ATLAS_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json';
 // scale(1070)/translate([480,250]), both tuned for this 960×600 stage.
 const SVG_W = 960, SVG_H = 600;
 
+// Named map color schemes. Each preset supplies a light- and dark-theme
+// variant; `background` is the ocean/water fill, `land` is the state and
+// territory fill (the map's "foreground" color), and `border` is the
+// state-to-state boundary stroke. "classic" light matches the card's
+// original look; the rest are just alternate starting points — any of the
+// three colors can still be overridden individually per theme.
+const PRESETS = {
+    classic: {
+        light: { background: '#c9d8e8', land: '#ede9dc', border: '#ffffff' },
+        dark: { background: '#0f172a', land: '#2c3440', border: '#161b22' },
+    },
+    slate: {
+        light: { background: '#d9e2ec', land: '#e4e7eb', border: '#ffffff' },
+        dark: { background: '#111827', land: '#1f2937', border: '#0b0f17' },
+    },
+    sepia: {
+        light: { background: '#e8dcc8', land: '#f1e6d3', border: '#ffffff' },
+        dark: { background: '#241c14', land: '#3a2f22', border: '#150f0a' },
+    },
+};
+const DEFAULT_PRESET = 'classic';
+
+// ── Config form (shared by the editor below) ─────────────────────────────────
+
+const FORM_SCHEMA = [
+    {
+        type: "grid",
+        name: "theme_settings",
+        schema: [
+            {
+                name: "theme_mode",
+                selector: {
+                    select: {
+                        mode: "dropdown",
+                        options: [
+                            { value: "auto", label: "Follow Home Assistant theme" },
+                            { value: "light", label: "Always light" },
+                            { value: "dark", label: "Always dark" },
+                        ],
+                    },
+                },
+            },
+            {
+                name: "color_preset",
+                selector: {
+                    select: {
+                        mode: "dropdown",
+                        options: [
+                            { value: "classic", label: "Classic" },
+                            { value: "slate", label: "Slate" },
+                            { value: "sepia", label: "Sepia" },
+                        ],
+                    },
+                },
+            },
+        ],
+    },
+    {
+        name: "show_background",
+        selector: { boolean: {} },
+    },
+    {
+        type: "expandable",
+        name: "light_theme_colors",
+        title: "Light theme colors",
+        icon: "mdi:white-balance-sunny",
+        schema: [
+            { name: "light_background_color", selector: { text: { type: "color" } } },
+            { name: "light_land_color", selector: { text: { type: "color" } } },
+            { name: "light_border_color", selector: { text: { type: "color" } } },
+        ],
+    },
+    {
+        type: "expandable",
+        name: "dark_theme_colors",
+        title: "Dark theme colors",
+        icon: "mdi:weather-night",
+        schema: [
+            { name: "dark_background_color", selector: { text: { type: "color" } } },
+            { name: "dark_land_color", selector: { text: { type: "color" } } },
+            { name: "dark_border_color", selector: { text: { type: "color" } } },
+        ],
+    },
+    {
+        type: "expandable",
+        name: "visited_marker",
+        title: "Visited marker",
+        icon: "mdi:map-marker-check",
+        schema: [
+            { name: "visited_icon", selector: { icon: {} } },
+            { name: "visited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
+            { name: "visited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
+            { name: "visited_color", selector: { text: { type: "color" } } },
+        ],
+    },
+    {
+        type: "expandable",
+        name: "unvisited_marker",
+        title: "Unvisited marker",
+        icon: "mdi:map-marker-outline",
+        schema: [
+            { name: "unvisited_icon", selector: { icon: {} } },
+            { name: "unvisited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
+            { name: "unvisited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
+            { name: "unvisited_color", selector: { text: { type: "color" } } },
+        ],
+    },
+];
+
+// Map of leaf option name → containing section name (or null for top-level),
+// derived from the schema so the two can't drift apart. Used to nest/flatten
+// config between the flat shape the card reads and the sectioned shape
+// ha-form reads/writes (named grid/expandable sections are data paths).
+const OPTION_SECTION = {};
+(function indexSchema(schema, parent) {
+    for (const item of schema) {
+        if (item.schema) indexSchema(item.schema, item.name || parent);
+        else OPTION_SECTION[item.name] = parent || null;
+    }
+})(FORM_SCHEMA, null);
+
+const SECTION_NAMES = [...new Set(Object.values(OPTION_SECTION).filter(Boolean))];
+
+// The complete flat default for every form option, given a flat config
+// (needed because color defaults depend on the chosen preset, and marker
+// size defaults honor the legacy marker_radius/marker_size options).
+function optionDefaults(flat) {
+    const preset = PRESETS[flat.color_preset] || PRESETS[DEFAULT_PRESET];
+    const legacySize = flat.marker_radius ? flat.marker_radius * 2 : (flat.marker_size || 12);
+    return {
+        theme_mode: 'auto',
+        color_preset: DEFAULT_PRESET,
+        show_background: true,
+        light_background_color: preset.light.background,
+        light_land_color: preset.light.land,
+        light_border_color: preset.light.border,
+        dark_background_color: preset.dark.background,
+        dark_land_color: preset.dark.land,
+        dark_border_color: preset.dark.border,
+        visited_icon: null,
+        visited_marker_size: legacySize,
+        visited_opacity: 1.0,
+        visited_color: '#2D6A4F',
+        unvisited_icon: null,
+        unvisited_marker_size: legacySize,
+        unvisited_opacity: 0.75,
+        unvisited_color: '#9a9a9a',
+    };
+}
+
+// Lift values nested under known section names up to the top level,
+// leaving everything else (type, legacy keys, etc.) untouched.
+function flattenConfig(config) {
+    const flat = {};
+    for (const [key, value] of Object.entries(config || {})) {
+        if (SECTION_NAMES.includes(key) && value && typeof value === 'object' && !Array.isArray(value)) {
+            Object.assign(flat, value);
+        } else {
+            flat[key] = value;
+        }
+    }
+    return flat;
+}
+
 // ── Card ─────────────────────────────────────────────────────────────────────
 
 class NPSParksCard extends HTMLElement {
@@ -58,9 +222,18 @@ class NPSParksCard extends HTMLElement {
         // (single shared diameter) both still work as a default for both
         // states, overridden by visited_marker_size/unvisited_marker_size
         // if those are present in config.
+        // The visual editor writes fields inside named grid/expandable
+        // sections nested under the section name; flatten those so the
+        // rest of the card reads flat keys, and hand-written flat YAML
+        // works identically.
+        config = flattenConfig(config);
+
         const legacyRadius = config.marker_radius;
         const legacySize = config.marker_size;
         const defaultSize = legacyRadius ? legacyRadius * 2 : (legacySize || 12);
+
+        const preset = PRESETS[config.color_preset] || PRESETS[DEFAULT_PRESET];
+
         this._config = {
             visited_color: '#2D6A4F',
             unvisited_color: '#9a9a9a',
@@ -70,15 +243,45 @@ class NPSParksCard extends HTMLElement {
             unvisited_marker_size: defaultSize,
             visited_icon: null,    // e.g. 'mdi:pine-tree' — null = plain dot
             unvisited_icon: null,  // e.g. 'mdi:circle-outline' — null = plain dot
-            background_color: '#c9d8e8',
+
+            // Which color set to render with. 'auto' follows Home
+            // Assistant's own light/dark mode; 'light'/'dark' pin it.
+            theme_mode: 'auto',
+            color_preset: DEFAULT_PRESET,
+
+            // Map colors, seeded from the chosen preset and individually
+            // overridable per theme.
             show_background: true,
+            light_background_color: preset.light.background,
+            light_land_color: preset.light.land,
+            light_border_color: preset.light.border,
+            dark_background_color: preset.dark.background,
+            dark_land_color: preset.dark.land,
+            dark_border_color: preset.dark.border,
+
             ...config,
         };
+
+        // Backward compat: the old flat `background_color` option predates
+        // theming and only ever described the light look. Treat it as a
+        // light-theme override unless light_background_color was already
+        // set explicitly.
+        if (config.background_color && !config.light_background_color) {
+            this._config.light_background_color = config.background_color;
+        }
+
         if (this._initialized) this._applyConfig();
     }
 
     set hass(hass) {
+        // In 'auto' theme mode, HA's own dark/light mode can change without
+        // setConfig() ever running again, so re-check on every hass update.
+        const wasDark = (this._initialized && this._config.theme_mode === 'auto')
+            ? this._isDarkMode() : null;
         this._hass = hass;
+        if (this._initialized && this._config.theme_mode === 'auto' && this._isDarkMode() !== wasDark) {
+            this._applyThemeColors();
+        }
         if (this._initialized) this._updateMarkers();
     }
 
@@ -268,6 +471,8 @@ class NPSParksCard extends HTMLElement {
         .no-parks { padding:20px; text-align:center; color: var(--secondary-text-color, #888); font-size:13px; }
       </style>
 
+      <style id="theme-vars"></style>
+
       <div id="map-wrap">
         <svg id="us-map"
              viewBox="0 0 ${SVG_W} ${SVG_H}"
@@ -318,15 +523,57 @@ class NPSParksCard extends HTMLElement {
         if (this._hass) this._updateMarkers();
     }
 
-    // ── Config application (live-updatable, no full rebuild needed) ──────────
+    // ── Theming ────────────────────────────────────────────────────────────────
 
-    _applyConfig() {
-        const noBg = this._config.show_background === false;
-        this.style.setProperty('--nps-ocean-color', noBg ? 'transparent' : this._config.background_color);
+    // Resolves theme_mode ('auto' | 'light' | 'dark') to an actual
+    // light/dark decision. 'auto' follows Home Assistant's own dark mode
+    // flag so the card matches the dashboard without any extra config.
+    _isDarkMode() {
+        const mode = this._config.theme_mode;
+        if (mode === 'light') return false;
+        if (mode === 'dark') return true;
+        return !!(this._hass && this._hass.themes && this._hass.themes.darkMode);
+    }
+
+    // Pushes the resolved light/dark map colors in as CSS custom
+    // properties on the host element. Custom properties inherit through
+    // the shadow boundary, so the shadow tree's own stylesheet (.state,
+    // .territory, :host background) picks these up automatically —
+    // nothing inside the shadow root needs to be touched or rebuilt.
+    _applyThemeColors() {
+        const c = this._config;
+        const dark = this._isDarkMode();
+        const background = dark ? c.dark_background_color : c.light_background_color;
+        const land = dark ? c.dark_land_color : c.light_land_color;
+        const border = dark ? c.dark_border_color : c.light_border_color;
+
+        const noBg = c.show_background === false;
+        this.style.setProperty('--nps-ocean-color', noBg ? 'transparent' : background);
         // removeProperty (not '') so the CSS var()'s fallback chain applies
         // again once the background is turned back on.
         if (noBg) this.style.setProperty('--nps-card-shadow', 'none');
         else this.style.removeProperty('--nps-card-shadow');
+
+        // Land/border colors are written as literal values into a style tag
+        // that lives inside the shadow root itself (rather than set as CSS
+        // custom properties on the host and relied on to inherit down into
+        // shadow descendants like the .state/.territory SVG paths). Same
+        // shadow tree, no inheritance boundary to cross — this is the most
+        // reliable way to guarantee the update actually reaches those
+        // elements.
+        const themeVarsEl = this.shadowRoot?.getElementById('theme-vars');
+        if (themeVarsEl) {
+            themeVarsEl.textContent = `
+                .state { fill: ${land}; stroke: ${border}; }
+                .territory { fill: ${land}; }
+            `;
+        }
+    }
+
+    // ── Config application (live-updatable, no full rebuild needed) ──────────
+
+    _applyConfig() {
+        this._applyThemeColors();
 
         // Marker color/size/icon aren't expressed as CSS vars (the SVG `r`
         // attribute isn't settable via CSS), so just rebuild on config
@@ -678,22 +925,111 @@ class NPSParksCard extends HTMLElement {
         return Math.max(1, Math.round(height / 50));
     }
 
-    static getConfigForm() {
-        return {
-            schema: [
-            { name: "visited_icon", selector: { icon: {} } },
-            { name: "visited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
-            { name: "visited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
-            { name: "visited_color", selector: { text: { type: "color" } } },
-            { name: "unvisited_icon", selector: { icon: {} } },
-            { name: "unvisited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
-            { name: "unvisited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
-            { name: "unvisited_color", selector: { text: { type: "color" } } },
-            { name: "background_color", selector: { text: {} } },
-            { name: "show_background", selector: { boolean: { type: "color" } } },
-            ],
-        };
+    // A custom editor element (rather than the schema-only getConfigForm
+    // API) so unset options can display their live defaults instead of
+    // blank fields — ha-form only shows what's literally in the data it's
+    // given, and getConfigForm gives no hook to inject merged defaults.
+    static getConfigElement() {
+        return document.createElement('nps-parks-card-editor');
     }
+}
+
+// ── Editor ───────────────────────────────────────────────────────────────────
+//
+// Thin wrapper around HA's own ha-form. Displayed data = defaults merged
+// with the stored config (so unset options show their real effective
+// values — preset colors, marker sizes, etc. — instead of blank fields).
+// On save, anything still equal to its default is stripped back out so the
+// stored YAML only contains what the user actually changed.
+
+class NPSParksCardEditor extends HTMLElement {
+    setConfig(config) {
+        this._config = config || {};
+        this._render();
+    }
+
+    set hass(hass) {
+        this._hass = hass;
+        if (this._form) this._form.hass = hass;
+    }
+
+    _render() {
+        if (!this._form) {
+            this._form = document.createElement('ha-form');
+            this._form.computeLabel = schema =>
+                schema.title ||
+                (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, ' ');
+            this._form.addEventListener('value-changed', ev => {
+                ev.stopPropagation();
+                this._valueChanged(ev.detail.value);
+            });
+            this.appendChild(this._form);
+        }
+        if (this._hass) this._form.hass = this._hass;
+        this._form.schema = FORM_SCHEMA;
+        this._form.data = this._displayData();
+    }
+
+    // Defaults merged with the stored config, nested into the section
+    // shape ha-form expects. Defaults are recomputed from the current flat
+    // values, so e.g. switching color_preset immediately refreshes what
+    // the unset color fields display.
+    _displayData() {
+        const flat = flattenConfig(this._config);
+        const merged = { ...optionDefaults(flat) };
+        for (const key of Object.keys(OPTION_SECTION)) {
+            if (flat[key] !== undefined && flat[key] !== null && flat[key] !== '') {
+                merged[key] = flat[key];
+            }
+        }
+
+        const data = {};
+        for (const [key, value] of Object.entries(merged)) {
+            const section = OPTION_SECTION[key];
+            if (section) (data[section] = data[section] || {})[key] = value;
+            else data[key] = value;
+        }
+        return data;
+    }
+
+    _valueChanged(value) {
+        const flat = flattenConfig(value);
+        const defaults = optionDefaults(flat);
+
+        // Keep only options that differ from their (preset-aware) default.
+        const kept = {};
+        for (const key of Object.keys(OPTION_SECTION)) {
+            const v = flat[key];
+            if (v === undefined || v === null || v === '') continue;
+            if (v === defaults[key]) continue;
+            kept[key] = v;
+        }
+
+        // Preserve non-option keys (type, view_layout, legacy options like
+        // marker_radius, …) from the existing config, then write the kept
+        // options back in their nested section shape.
+        const out = {};
+        for (const [key, v] of Object.entries(this._config)) {
+            if (key in OPTION_SECTION || SECTION_NAMES.includes(key)) continue;
+            out[key] = v;
+        }
+        for (const [key, v] of Object.entries(kept)) {
+            const section = OPTION_SECTION[key];
+            if (section) (out[section] = out[section] || {})[key] = v;
+            else out[key] = v;
+        }
+
+        this._config = out;
+        this.dispatchEvent(new CustomEvent('config-changed', {
+            detail: { config: out },
+            bubbles: true,
+            composed: true,
+        }));
+    }
+}
+
+if (!customElements.get('nps-parks-card-editor')) {
+    customElements.define('nps-parks-card-editor', NPSParksCardEditor);
 }
 
 if (!customElements.get('nps-parks-card')) {
