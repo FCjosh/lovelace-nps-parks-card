@@ -44,16 +44,16 @@ const SVG_W = 960, SVG_H = 600;
 // three colors can still be overridden individually per theme.
 const PRESETS = {
     classic: {
-        light: { background: '#c9d8e8', land: '#ede9dc', border: '#ffffff' },
-        dark: { background: '#0f172a', land: '#2c3440', border: '#161b22' },
+        light: { background: '#c9d8e8', land: '#ede9dc', border: '#ffffff', coastline: '#c0b898' },
+        dark: { background: '#0f172a', land: '#2c3440', border: '#161b22', coastline: '#4a5568' },
     },
     slate: {
-        light: { background: '#d9e2ec', land: '#e4e7eb', border: '#ffffff' },
-        dark: { background: '#111827', land: '#1f2937', border: '#0b0f17' },
+        light: { background: '#d9e2ec', land: '#e4e7eb', border: '#ffffff', coastline: '#9fb3c8' },
+        dark: { background: '#111827', land: '#1f2937', border: '#0b0f17', coastline: '#374151' },
     },
     sepia: {
-        light: { background: '#e8dcc8', land: '#f1e6d3', border: '#ffffff' },
-        dark: { background: '#241c14', land: '#3a2f22', border: '#150f0a' },
+        light: { background: '#e8dcc8', land: '#f1e6d3', border: '#ffffff', coastline: '#b39b72' },
+        dark: { background: '#241c14', land: '#3a2f22', border: '#150f0a', coastline: '#5a4a35' },
     },
 };
 const DEFAULT_PRESET = 'classic';
@@ -99,28 +99,6 @@ const FORM_SCHEMA = [
     },
     {
         type: "expandable",
-        name: "light_theme_colors",
-        title: "Light theme colors",
-        icon: "mdi:white-balance-sunny",
-        schema: [
-            { name: "light_background_color", selector: { text: { type: "color" } } },
-            { name: "light_land_color", selector: { text: { type: "color" } } },
-            { name: "light_border_color", selector: { text: { type: "color" } } },
-        ],
-    },
-    {
-        type: "expandable",
-        name: "dark_theme_colors",
-        title: "Dark theme colors",
-        icon: "mdi:weather-night",
-        schema: [
-            { name: "dark_background_color", selector: { text: { type: "color" } } },
-            { name: "dark_land_color", selector: { text: { type: "color" } } },
-            { name: "dark_border_color", selector: { text: { type: "color" } } },
-        ],
-    },
-    {
-        type: "expandable",
         name: "visited_marker",
         title: "Visited marker",
         icon: "mdi:map-marker-check",
@@ -128,7 +106,6 @@ const FORM_SCHEMA = [
             { name: "visited_icon", selector: { icon: {} } },
             { name: "visited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
             { name: "visited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
-            { name: "visited_color", selector: { text: { type: "color" } } },
         ],
     },
     {
@@ -140,7 +117,38 @@ const FORM_SCHEMA = [
             { name: "unvisited_icon", selector: { icon: {} } },
             { name: "unvisited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
             { name: "unvisited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
-            { name: "unvisited_color", selector: { text: { type: "color" } } },
+        ],
+    },
+];
+
+// Color options aren't in FORM_SCHEMA: ha-form's text/color selector paints
+// the swatch over its own label, so the editor renders these itself as
+// label-left / swatch-right rows, grouped as below. Values are stored flat
+// at the top level of the config.
+const COLOR_GROUPS = [
+    {
+        title: 'Light theme colors',
+        keys: [
+            ['light_background_color', 'Background'],
+            ['light_land_color', 'Land'],
+            ['light_border_color', 'State borders'],
+            ['light_coastline_color', 'Coastline'],
+        ],
+    },
+    {
+        title: 'Dark theme colors',
+        keys: [
+            ['dark_background_color', 'Background'],
+            ['dark_land_color', 'Land'],
+            ['dark_border_color', 'State borders'],
+            ['dark_coastline_color', 'Coastline'],
+        ],
+    },
+    {
+        title: 'Marker colors',
+        keys: [
+            ['visited_color', 'Visited'],
+            ['unvisited_color', 'Unvisited'],
         ],
     },
 ];
@@ -159,6 +167,11 @@ const OPTION_SECTION = {};
 
 const SECTION_NAMES = [...new Set(Object.values(OPTION_SECTION).filter(Boolean))];
 
+// Configs saved by earlier versions of this editor nested colors under
+// these section names; still unwrap them on read.
+const LEGACY_SECTION_NAMES = ['light_theme_colors', 'dark_theme_colors'];
+const ALL_SECTION_NAMES = [...SECTION_NAMES, ...LEGACY_SECTION_NAMES];
+
 // The complete flat default for every form option, given a flat config
 // (needed because color defaults depend on the chosen preset, and marker
 // size defaults honor the legacy marker_radius/marker_size options).
@@ -172,9 +185,11 @@ function optionDefaults(flat) {
         light_background_color: preset.light.background,
         light_land_color: preset.light.land,
         light_border_color: preset.light.border,
+        light_coastline_color: preset.light.coastline,
         dark_background_color: preset.dark.background,
         dark_land_color: preset.dark.land,
         dark_border_color: preset.dark.border,
+        dark_coastline_color: preset.dark.coastline,
         visited_icon: null,
         visited_marker_size: legacySize,
         visited_opacity: 1.0,
@@ -186,12 +201,20 @@ function optionDefaults(flat) {
     };
 }
 
+// Case-insensitive for hex colors, strict otherwise.
+function optionEquals(a, b) {
+    if (typeof a === 'string' && typeof b === 'string') {
+        return a.toLowerCase() === b.toLowerCase();
+    }
+    return a === b;
+}
+
 // Lift values nested under known section names up to the top level,
 // leaving everything else (type, legacy keys, etc.) untouched.
 function flattenConfig(config) {
     const flat = {};
     for (const [key, value] of Object.entries(config || {})) {
-        if (SECTION_NAMES.includes(key) && value && typeof value === 'object' && !Array.isArray(value)) {
+        if (ALL_SECTION_NAMES.includes(key) && value && typeof value === 'object' && !Array.isArray(value)) {
             Object.assign(flat, value);
         } else {
             flat[key] = value;
@@ -255,9 +278,11 @@ class NPSParksCard extends HTMLElement {
             light_background_color: preset.light.background,
             light_land_color: preset.light.land,
             light_border_color: preset.light.border,
+            light_coastline_color: preset.light.coastline,
             dark_background_color: preset.dark.background,
             dark_land_color: preset.dark.land,
             dark_border_color: preset.dark.border,
+            dark_coastline_color: preset.dark.coastline,
 
             ...config,
         };
@@ -546,6 +571,7 @@ class NPSParksCard extends HTMLElement {
         const background = dark ? c.dark_background_color : c.light_background_color;
         const land = dark ? c.dark_land_color : c.light_land_color;
         const border = dark ? c.dark_border_color : c.light_border_color;
+        const coastline = dark ? c.dark_coastline_color : c.light_coastline_color;
 
         const noBg = c.show_background === false;
         this.style.setProperty('--nps-ocean-color', noBg ? 'transparent' : background);
@@ -565,7 +591,8 @@ class NPSParksCard extends HTMLElement {
         if (themeVarsEl) {
             themeVarsEl.textContent = `
                 .state { fill: ${land}; stroke: ${border}; }
-                .territory { fill: ${land}; }
+                .territory { fill: ${land}; stroke: ${coastline}; }
+                .nation-border { stroke: ${coastline}; }
             `;
         }
     }
@@ -954,72 +981,142 @@ class NPSParksCardEditor extends HTMLElement {
     }
 
     _render() {
-        if (!this._form) {
-            this._form = document.createElement('ha-form');
-            this._form.computeLabel = schema =>
-                schema.title ||
-                (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, ' ');
-            this._form.addEventListener('value-changed', ev => {
-                ev.stopPropagation();
-                this._valueChanged(ev.detail.value);
-            });
-            this.appendChild(this._form);
-        }
+        if (!this._built) this._build();
         if (this._hass) this._form.hass = this._hass;
-        this._form.schema = FORM_SCHEMA;
-        this._form.data = this._displayData();
-    }
 
-    // Defaults merged with the stored config, nested into the section
-    // shape ha-form expects. Defaults are recomputed from the current flat
-    // values, so e.g. switching color_preset immediately refreshes what
-    // the unset color fields display.
-    _displayData() {
         const flat = flattenConfig(this._config);
         const merged = { ...optionDefaults(flat) };
-        for (const key of Object.keys(OPTION_SECTION)) {
+        for (const key of Object.keys(merged)) {
             if (flat[key] !== undefined && flat[key] !== null && flat[key] !== '') {
                 merged[key] = flat[key];
             }
         }
 
+        // ha-form data: form-managed options only, nested into sections
         const data = {};
-        for (const [key, value] of Object.entries(merged)) {
+        for (const key of Object.keys(OPTION_SECTION)) {
             const section = OPTION_SECTION[key];
-            if (section) (data[section] = data[section] || {})[key] = value;
-            else data[key] = value;
+            if (section) (data[section] = data[section] || {})[key] = merged[key];
+            else data[key] = merged[key];
         }
-        return data;
+        this._form.schema = FORM_SCHEMA;
+        this._form.data = data;
+
+        // Color rows: show the merged (default-aware) value. <input
+        // type="color"> needs a #rrggbb string; fall back to black only if
+        // a value is somehow unparseable rather than crashing.
+        for (const [key, input] of Object.entries(this._colorInputs)) {
+            const v = merged[key];
+            input.value = (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) ? v : '#000000';
+        }
     }
 
-    _valueChanged(value) {
-        const flat = flattenConfig(value);
+    _build() {
+        this._built = true;
+        this._colorInputs = {};
+
+        const style = document.createElement('style');
+        style.textContent = `
+            .nps-color-group { margin-top: 12px; }
+            .nps-color-rows { padding: 4px 16px 12px; }
+            .nps-color-row {
+                display: flex; align-items: center; justify-content: space-between;
+                padding: 6px 0;
+            }
+            .nps-color-row label {
+                color: var(--primary-text-color);
+                font-size: 14px;
+            }
+            .nps-color-row input[type="color"] {
+                width: 52px; height: 32px; padding: 2px;
+                border: 1px solid var(--divider-color, #ccc);
+                border-radius: 6px;
+                background: var(--card-background-color, #fff);
+                cursor: pointer;
+            }
+        `;
+        this.appendChild(style);
+
+        this._form = document.createElement('ha-form');
+        this._form.computeLabel = schema =>
+            schema.title ||
+            (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, ' ');
+        this._form.addEventListener('value-changed', ev => {
+            ev.stopPropagation();
+            this._formChanged(ev.detail.value);
+        });
+        this.appendChild(this._form);
+
+        for (const group of COLOR_GROUPS) {
+            const panel = document.createElement('ha-expansion-panel');
+            panel.className = 'nps-color-group';
+            panel.outlined = true;
+            panel.header = group.title;
+
+            const rows = document.createElement('div');
+            rows.className = 'nps-color-rows';
+            for (const [key, label] of group.keys) {
+                const row = document.createElement('div');
+                row.className = 'nps-color-row';
+
+                const labelEl = document.createElement('label');
+                labelEl.textContent = label;
+
+                const input = document.createElement('input');
+                input.type = 'color';
+                input.addEventListener('input', e => this._colorChanged(key, e.target.value));
+
+                row.appendChild(labelEl);
+                row.appendChild(input);
+                rows.appendChild(row);
+                this._colorInputs[key] = input;
+            }
+            panel.appendChild(rows);
+            this.appendChild(panel);
+        }
+    }
+
+    // ha-form fired: fold its (nested) values into the flat working config.
+    // Take form-managed keys from the form verbatim — including cleared
+    // ones — so e.g. removing an icon actually unsets it.
+    _formChanged(value) {
+        const formFlat = flattenConfig(value);
+        const flat = flattenConfig(this._config);
+        for (const key of Object.keys(OPTION_SECTION)) {
+            if (formFlat[key] === undefined) delete flat[key];
+            else flat[key] = formFlat[key];
+        }
+        this._commit(flat);
+    }
+
+    _colorChanged(key, value) {
+        const flat = flattenConfig(this._config);
+        flat[key] = value;
+        this._commit(flat);
+    }
+
+    // Strip anything equal to its (preset-aware) default, re-nest
+    // form-managed options into their sections, keep colors flat, preserve
+    // all non-option keys (type, view_layout, legacy marker_radius, …).
+    _commit(flat) {
         const defaults = optionDefaults(flat);
 
-        // Keep only options that differ from their (preset-aware) default.
-        const kept = {};
-        for (const key of Object.keys(OPTION_SECTION)) {
-            const v = flat[key];
-            if (v === undefined || v === null || v === '') continue;
-            if (v === defaults[key]) continue;
-            kept[key] = v;
-        }
-
-        // Preserve non-option keys (type, view_layout, legacy options like
-        // marker_radius, …) from the existing config, then write the kept
-        // options back in their nested section shape.
         const out = {};
         for (const [key, v] of Object.entries(this._config)) {
-            if (key in OPTION_SECTION || SECTION_NAMES.includes(key)) continue;
+            if (key in defaults || ALL_SECTION_NAMES.includes(key)) continue;
             out[key] = v;
         }
-        for (const [key, v] of Object.entries(kept)) {
-            const section = OPTION_SECTION[key];
+        for (const key of Object.keys(defaults)) {
+            const v = flat[key];
+            if (v === undefined || v === null || v === '') continue;
+            if (optionEquals(v, defaults[key])) continue;
+            const section = OPTION_SECTION[key];  // undefined for colors → flat
             if (section) (out[section] = out[section] || {})[key] = v;
             else out[key] = v;
         }
 
         this._config = out;
+        this._render();
         this.dispatchEvent(new CustomEvent('config-changed', {
             detail: { config: out },
             bubbles: true,
