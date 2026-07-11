@@ -1,6 +1,6 @@
 {
   "name": "nps-parks-card",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "A Lovelace card for Home Assistant that tracks visited National Park Service sites on an interactive map.",
   "private": true,
   "type": "module",
