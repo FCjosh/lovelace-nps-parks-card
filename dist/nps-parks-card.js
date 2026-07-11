@@ -4568,6 +4568,15 @@ function optionDefaults(flat) {
     unvisited_color: "#9a9a9a"
   };
 }
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[ch]);
+}
 function optionEquals(a, b) {
   if (typeof a === "string" && typeof b === "string") {
     return a.toLowerCase() === b.toLowerCase();
@@ -4593,6 +4602,7 @@ var NPSParksCard = class extends HTMLElement {
     this._config = {};
     this._projection = null;
     this._markers = {};
+    this._lastEntities = null;
     this._initialized = false;
     this._panelOpen = false;
     this._search = "";
@@ -4653,6 +4663,7 @@ var NPSParksCard = class extends HTMLElement {
   disconnectedCallback() {
     this._projection = null;
     this._markers = {};
+    this._lastEntities = null;
     this._initialized = false;
     this._panelOpen = false;
     this.shadowRoot.innerHTML = "";
@@ -4913,8 +4924,7 @@ var NPSParksCard = class extends HTMLElement {
   _applyConfig() {
     this._applyThemeColors();
     if (this._initialized) {
-      Object.values(this._markers).forEach(({ el }) => el.remove());
-      this._markers = {};
+      this._lastEntities = null;
       if (this._hass) this._updateMarkers();
     }
   }
@@ -4957,6 +4967,10 @@ var NPSParksCard = class extends HTMLElement {
     const iconLayer = this.shadowRoot.querySelector("#icon-layer");
     if (!markerGroup || !iconLayer) return;
     const entities = this._getParkEntities();
+    if (this._lastEntities && entities.length === this._lastEntities.size && entities.every((e) => this._lastEntities.get(e.attributes.park_code) === e)) {
+      return;
+    }
+    this._lastEntities = new Map(entities.map((e) => [e.attributes.park_code, e]));
     const seen = /* @__PURE__ */ new Set();
     entities.forEach((entity) => {
       const code = entity.attributes.park_code;
@@ -5045,19 +5059,20 @@ var NPSParksCard = class extends HTMLElement {
     const a = entity.attributes;
     const isVisited = entity.state === "visited";
     const img = a.image;
-    const desc = (a.description || "").slice(0, 220);
+    const rawDesc = a.description || "";
+    const desc = rawDesc.slice(0, 220);
     const meta = [a.designation, a.states].filter(Boolean).join(" \u2022 ");
     this.shadowRoot.querySelector("#popup-content").innerHTML = `
-      ${img ? `<img class="popup-img" src="${img.url}" alt="${img.alt_text || ""}">` : ""}
+      ${img ? `<img class="popup-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt_text || "")}">` : ""}
       <div class="popup-body">
-        <div class="popup-name">${a.friendly_name || entity.entity_id}</div>
-        ${meta ? `<div class="popup-meta">${meta}</div>` : ""}
-        <div class="popup-desc">${desc.length === 220 ? desc + "\u2026" : desc}</div>
-        ${a.url ? `<a class="popup-link" href="${a.url}" target="_blank" rel="noopener"
+        <div class="popup-name">${escapeHtml(a.friendly_name || entity.entity_id)}</div>
+        ${meta ? `<div class="popup-meta">${escapeHtml(meta)}</div>` : ""}
+        <div class="popup-desc">${escapeHtml(desc)}${rawDesc.length > 220 ? "\u2026" : ""}</div>
+        ${a.url ? `<a class="popup-link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener"
             style="color:${this._config.visited_color}">Learn more \u2192</a>` : ""}
         <button class="popup-toggle"
           style="background:${isVisited ? "#c0392b" : this._config.visited_color}"
-          data-code="${code}" data-state="${entity.state}">
+          data-code="${escapeHtml(code)}" data-state="${escapeHtml(entity.state)}">
           ${isVisited ? "\u2713 Visited \u2014 Mark Unvisited" : "Mark as Visited"}
         </button>
       </div>
@@ -5125,10 +5140,10 @@ var NPSParksCard = class extends HTMLElement {
         <div class="park-row">
           <div class="park-dot" style="background:${color}"></div>
           <div style="flex:1;min-width:0">
-            <div class="park-name">${name}</div>
-            <div class="park-desig">${desig}</div>
+            <div class="park-name">${escapeHtml(name)}</div>
+            <div class="park-desig">${escapeHtml(desig)}</div>
           </div>
-          <button class="park-btn" data-code="${code}" data-state="${e.state}"
+          <button class="park-btn" data-code="${escapeHtml(code)}" data-state="${escapeHtml(e.state)}"
             style="background:${isVisited ? "#c0392b" : this._config.visited_color}">
             ${isVisited ? "Unvisit" : "Visit"}
           </button>

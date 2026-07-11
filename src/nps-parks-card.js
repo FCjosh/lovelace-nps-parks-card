@@ -201,6 +201,18 @@ function optionDefaults(flat) {
     };
 }
 
+// Popup/panel content is built from HA entity attributes (friendly_name is
+// user-editable via customize.yaml; image/description/url come from the
+// upstream NPS API via ha-nps-parks) and interpolated into innerHTML,
+// including inside quoted attributes (src=, href=, alt=) — escape quotes
+// too, not just angle brackets, so a value can't break out of the
+// attribute and inject markup.
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+}
+
 // Case-insensitive for hex colors, strict otherwise.
 function optionEquals(a, b) {
     if (typeof a === 'string' && typeof b === 'string') {
@@ -233,6 +245,7 @@ class NPSParksCard extends HTMLElement {
         this._config = {};
         this._projection = null;   // geoAlbersUsaTerritories composite projection
         this._markers = {};        // park_code → { type: 'circle'|'icon', el }
+        this._lastEntities = null; // park_code → last-seen entity object, for _updateMarkers' skip check
         this._initialized = false;
         this._panelOpen = false;
         this._search = '';
@@ -317,6 +330,7 @@ class NPSParksCard extends HTMLElement {
     disconnectedCallback() {
         this._projection = null;
         this._markers = {};
+        this._lastEntities = null;
         this._initialized = false;
         this._panelOpen = false;
         this.shadowRoot.innerHTML = '';
@@ -603,11 +617,14 @@ class NPSParksCard extends HTMLElement {
         this._applyThemeColors();
 
         // Marker color/size/icon aren't expressed as CSS vars (the SVG `r`
-        // attribute isn't settable via CSS), so just rebuild on config
-        // change — cheap, since this only runs on init and on setConfig().
+        // attribute isn't settable via CSS), so let _updateMarkers() re-run
+        // its usual per-marker diff against the new style — it already
+        // restyles existing markers in place, or recreates them only when a
+        // marker's circle/icon representation actually changes, so there's
+        // no need to tear every marker down here first. _lastEntities is
+        // reset so that diff runs even if no entity state actually changed.
         if (this._initialized) {
-            Object.values(this._markers).forEach(({ el }) => el.remove());
-            this._markers = {};
+            this._lastEntities = null;
             if (this._hass) this._updateMarkers();
         }
     }
@@ -691,6 +708,19 @@ class NPSParksCard extends HTMLElement {
         if (!markerGroup || !iconLayer) return;
 
         const entities = this._getParkEntities();
+
+        // HA replaces an entity's state object only when that entity's
+        // state/attributes actually change — everything else keeps the
+        // same reference across a hass update. set hass() re-runs this on
+        // every hass update in the whole HA instance (not just ones
+        // touching tracked parks), so skip the diff/restyle pass below when
+        // every tracked entity is still the same reference as last time.
+        if (this._lastEntities && entities.length === this._lastEntities.size &&
+            entities.every(e => this._lastEntities.get(e.attributes.park_code) === e)) {
+            return;
+        }
+        this._lastEntities = new Map(entities.map(e => [e.attributes.park_code, e]));
+
         const seen = new Set();
 
         entities.forEach(entity => {
@@ -819,20 +849,21 @@ class NPSParksCard extends HTMLElement {
         const a = entity.attributes;
         const isVisited = entity.state === 'visited';
         const img = a.image;
-        const desc = (a.description || '').slice(0, 220);
+        const rawDesc = a.description || '';
+        const desc = rawDesc.slice(0, 220);
         const meta = [a.designation, a.states].filter(Boolean).join(' • ');
 
         this.shadowRoot.querySelector('#popup-content').innerHTML = `
-      ${img ? `<img class="popup-img" src="${img.url}" alt="${img.alt_text || ''}">` : ''}
+      ${img ? `<img class="popup-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt_text || '')}">` : ''}
       <div class="popup-body">
-        <div class="popup-name">${a.friendly_name || entity.entity_id}</div>
-        ${meta ? `<div class="popup-meta">${meta}</div>` : ''}
-        <div class="popup-desc">${desc.length === 220 ? desc + '…' : desc}</div>
-        ${a.url ? `<a class="popup-link" href="${a.url}" target="_blank" rel="noopener"
+        <div class="popup-name">${escapeHtml(a.friendly_name || entity.entity_id)}</div>
+        ${meta ? `<div class="popup-meta">${escapeHtml(meta)}</div>` : ''}
+        <div class="popup-desc">${escapeHtml(desc)}${rawDesc.length > 220 ? '…' : ''}</div>
+        ${a.url ? `<a class="popup-link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener"
             style="color:${this._config.visited_color}">Learn more →</a>` : ''}
         <button class="popup-toggle"
           style="background:${isVisited ? '#c0392b' : this._config.visited_color}"
-          data-code="${code}" data-state="${entity.state}">
+          data-code="${escapeHtml(code)}" data-state="${escapeHtml(entity.state)}">
           ${isVisited ? '✓ Visited — Mark Unvisited' : 'Mark as Visited'}
         </button>
       </div>
@@ -923,10 +954,10 @@ class NPSParksCard extends HTMLElement {
         <div class="park-row">
           <div class="park-dot" style="background:${color}"></div>
           <div style="flex:1;min-width:0">
-            <div class="park-name">${name}</div>
-            <div class="park-desig">${desig}</div>
+            <div class="park-name">${escapeHtml(name)}</div>
+            <div class="park-desig">${escapeHtml(desig)}</div>
           </div>
-          <button class="park-btn" data-code="${code}" data-state="${e.state}"
+          <button class="park-btn" data-code="${escapeHtml(code)}" data-state="${escapeHtml(e.state)}"
             style="background:${isVisited ? '#c0392b' : this._config.visited_color}">
             ${isVisited ? 'Unvisit' : 'Visit'}
           </button>
