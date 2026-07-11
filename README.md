@@ -33,8 +33,12 @@ one entity per site to track. You'll need that integration installed first
 - A searchable slide-in panel lists every tracked park.
 - Card height is derived automatically from whatever width Lovelace gives it
   — no manual sizing required.
-- Fully themeable: reads Home Assistant's theme variables for text/background
-  colors, and supports a fully transparent background.
+- Fully themeable: follows Home Assistant's light/dark mode automatically
+  (or pin it explicitly), with three built-in color presets (classic, slate,
+  sepia) and every map color — background, land, borders, coastline —
+  independently overridable per theme.
+- Visual editor for every option below, including live color swatches — no
+  YAML required.
 
 ## Requirements
 
@@ -73,10 +77,28 @@ No configuration is required.
 
 ## Configuration options
 
-All options are optional; defaults are shown below.
+The easiest way to configure the card is the visual editor — add it via the
+dashboard UI and click **Edit**; every option below is exposed there,
+including live color swatches. Everything is also settable directly in
+YAML. All options are optional; defaults are shown below.
 
 ```yaml
 type: custom:nps-parks-card
+
+# Theme
+theme_mode: auto        # 'auto' (follows HA's light/dark mode) | 'light' | 'dark'
+color_preset: classic   # 'classic' | 'slate' | 'sepia' — starting point for the map colors below
+show_background: true   # false = fully transparent card, no shadow either
+
+# Map colors — seeded from color_preset, override any of them individually
+light_background_color: '#c9d8e8'   # ocean/water fill, light mode
+light_land_color: '#ede9dc'         # state/territory fill, light mode
+light_border_color: '#ffffff'       # state border stroke, light mode
+light_coastline_color: '#c0b898'    # national coastline + territory border, light mode
+dark_background_color: '#0f172a'
+dark_land_color: '#2c3440'
+dark_border_color: '#161b22'
+dark_coastline_color: '#4a5568'
 
 # Marker colors and opacity
 visited_color: '#2D6A4F'
@@ -88,22 +110,29 @@ unvisited_opacity: 0.75
 visited_marker_size: 12
 unvisited_marker_size: 12
 
-# Optional MDI icon per state (e.g. 'mdi:pine-tree'). Leave unset for a
-# plain colored dot. Visited and unvisited are independent — mix and match
-# freely, e.g. an icon for visited parks and a dot for unvisited ones.
-visited_icon: null
+# Optional MDI icon per state. Leave unset (null) for a plain colored dot.
+# Visited and unvisited are independent — mix and match freely, e.g. an
+# icon for visited parks and a dot for unvisited ones.
+visited_icon: mdi:pine-tree
 unvisited_icon: null
-
-# Card background (the "ocean")
-background_color: '#c9d8e8'
-show_background: true   # false = fully transparent card, no shadow either
 ```
 
-### Example: icon markers
+The color values above are the `classic` preset's defaults — switching
+`color_preset` to `slate` or `sepia` changes the effective default for any
+of the eight `*_color` options you haven't explicitly set yourself.
+
+### Example: alternate color preset
 
 ```yaml
 type: custom:nps-parks-card
-visited_icon: mdi:pine-tree
+color_preset: sepia
+```
+
+### Example: icon markers for both states
+
+```yaml
+type: custom:nps-parks-card
+unvisited_icon: mdi:map-marker-outline
 visited_marker_size: 18
 unvisited_marker_size: 10
 ```

@@ -4431,6 +4431,168 @@ var import_geo_albers_usa_territories = __toESM(require_geo_albers_usa_territori
 var US_ATLAS_URL = "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json";
 var SVG_W = 960;
 var SVG_H = 600;
+var PRESETS = {
+  classic: {
+    light: { background: "#c9d8e8", land: "#ede9dc", border: "#ffffff", coastline: "#c0b898" },
+    dark: { background: "#0f172a", land: "#2c3440", border: "#161b22", coastline: "#4a5568" }
+  },
+  slate: {
+    light: { background: "#d9e2ec", land: "#e4e7eb", border: "#ffffff", coastline: "#9fb3c8" },
+    dark: { background: "#111827", land: "#1f2937", border: "#0b0f17", coastline: "#374151" }
+  },
+  sepia: {
+    light: { background: "#e8dcc8", land: "#f1e6d3", border: "#ffffff", coastline: "#b39b72" },
+    dark: { background: "#241c14", land: "#3a2f22", border: "#150f0a", coastline: "#5a4a35" }
+  }
+};
+var DEFAULT_PRESET = "classic";
+var FORM_SCHEMA = [
+  {
+    type: "grid",
+    name: "theme_settings",
+    schema: [
+      {
+        name: "theme_mode",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: [
+              { value: "auto", label: "Follow Home Assistant theme" },
+              { value: "light", label: "Always light" },
+              { value: "dark", label: "Always dark" }
+            ]
+          }
+        }
+      },
+      {
+        name: "color_preset",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: [
+              { value: "classic", label: "Classic" },
+              { value: "slate", label: "Slate" },
+              { value: "sepia", label: "Sepia" }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    name: "show_background",
+    selector: { boolean: {} }
+  }
+];
+var MARKER_GROUPS = [
+  {
+    key: "visited",
+    title: "Visited marker",
+    colorKey: "visited_color",
+    colorLabel: "Marker color",
+    fields: [
+      { name: "visited_icon", selector: { icon: {} } },
+      { name: "visited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
+      { name: "visited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } }
+    ]
+  },
+  {
+    key: "unvisited",
+    title: "Unvisited marker",
+    colorKey: "unvisited_color",
+    colorLabel: "Marker color",
+    fields: [
+      { name: "unvisited_icon", selector: { icon: {} } },
+      { name: "unvisited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
+      { name: "unvisited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } }
+    ]
+  }
+];
+var COLOR_GROUPS = [
+  {
+    title: "Light theme colors",
+    keys: [
+      ["light_background_color", "Background"],
+      ["light_land_color", "Land"],
+      ["light_border_color", "State borders"],
+      ["light_coastline_color", "Coastline"]
+    ]
+  },
+  {
+    title: "Dark theme colors",
+    keys: [
+      ["dark_background_color", "Background"],
+      ["dark_land_color", "Land"],
+      ["dark_border_color", "State borders"],
+      ["dark_coastline_color", "Coastline"]
+    ]
+  }
+];
+var OPTION_SECTION = {};
+(function indexSchema(schema, parent) {
+  for (const item of schema) {
+    if (item.schema) indexSchema(item.schema, item.name || parent);
+    else OPTION_SECTION[item.name] = parent || null;
+  }
+})(FORM_SCHEMA, null);
+var MAIN_FORM_KEYS = Object.keys(OPTION_SECTION);
+for (const group of MARKER_GROUPS) {
+  for (const field of group.fields) OPTION_SECTION[field.name] = null;
+}
+var SECTION_NAMES = [...new Set(Object.values(OPTION_SECTION).filter(Boolean))];
+var LEGACY_SECTION_NAMES = ["light_theme_colors", "dark_theme_colors", "visited_marker", "unvisited_marker"];
+var ALL_SECTION_NAMES = [...SECTION_NAMES, ...LEGACY_SECTION_NAMES];
+function optionDefaults(flat) {
+  const preset = PRESETS[flat.color_preset] || PRESETS[DEFAULT_PRESET];
+  const legacySize = flat.marker_radius ? flat.marker_radius * 2 : flat.marker_size || 12;
+  return {
+    theme_mode: "auto",
+    color_preset: DEFAULT_PRESET,
+    show_background: true,
+    light_background_color: preset.light.background,
+    light_land_color: preset.light.land,
+    light_border_color: preset.light.border,
+    light_coastline_color: preset.light.coastline,
+    dark_background_color: preset.dark.background,
+    dark_land_color: preset.dark.land,
+    dark_border_color: preset.dark.border,
+    dark_coastline_color: preset.dark.coastline,
+    visited_icon: "mdi:pine-tree",
+    visited_marker_size: legacySize,
+    visited_opacity: 1,
+    visited_color: "#2D6A4F",
+    unvisited_icon: null,
+    unvisited_marker_size: legacySize,
+    unvisited_opacity: 0.75,
+    unvisited_color: "#9a9a9a"
+  };
+}
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[ch]);
+}
+function optionEquals(a, b) {
+  if (typeof a === "string" && typeof b === "string") {
+    return a.toLowerCase() === b.toLowerCase();
+  }
+  return a === b;
+}
+function flattenConfig(config) {
+  const flat = {};
+  for (const [key, value] of Object.entries(config || {})) {
+    if (ALL_SECTION_NAMES.includes(key) && value && typeof value === "object" && !Array.isArray(value)) {
+      Object.assign(flat, value);
+    } else {
+      flat[key] = value;
+    }
+  }
+  return flat;
+}
 var NPSParksCard = class extends HTMLElement {
   constructor() {
     super();
@@ -4439,6 +4601,7 @@ var NPSParksCard = class extends HTMLElement {
     this._config = {};
     this._projection = null;
     this._markers = {};
+    this._lastEntities = null;
     this._initialized = false;
     this._panelOpen = false;
     this._search = "";
@@ -4447,9 +4610,11 @@ var NPSParksCard = class extends HTMLElement {
     return {};
   }
   setConfig(config) {
+    config = flattenConfig(config);
     const legacyRadius = config.marker_radius;
     const legacySize = config.marker_size;
     const defaultSize = legacyRadius ? legacyRadius * 2 : legacySize || 12;
+    const preset = PRESETS[config.color_preset] || PRESETS[DEFAULT_PRESET];
     this._config = {
       visited_color: "#2D6A4F",
       unvisited_color: "#9a9a9a",
@@ -4457,18 +4622,37 @@ var NPSParksCard = class extends HTMLElement {
       unvisited_opacity: 0.75,
       visited_marker_size: defaultSize,
       unvisited_marker_size: defaultSize,
-      visited_icon: null,
-      // e.g. 'mdi:pine-tree' — null = plain dot
+      visited_icon: "mdi:pine-tree",
       unvisited_icon: null,
       // e.g. 'mdi:circle-outline' — null = plain dot
-      background_color: "#c9d8e8",
+      // Which color set to render with. 'auto' follows Home
+      // Assistant's own light/dark mode; 'light'/'dark' pin it.
+      theme_mode: "auto",
+      color_preset: DEFAULT_PRESET,
+      // Map colors, seeded from the chosen preset and individually
+      // overridable per theme.
       show_background: true,
+      light_background_color: preset.light.background,
+      light_land_color: preset.light.land,
+      light_border_color: preset.light.border,
+      light_coastline_color: preset.light.coastline,
+      dark_background_color: preset.dark.background,
+      dark_land_color: preset.dark.land,
+      dark_border_color: preset.dark.border,
+      dark_coastline_color: preset.dark.coastline,
       ...config
     };
+    if (config.background_color && !config.light_background_color) {
+      this._config.light_background_color = config.background_color;
+    }
     if (this._initialized) this._applyConfig();
   }
   set hass(hass) {
+    const wasDark = this._initialized && this._config.theme_mode === "auto" ? this._isDarkMode() : null;
     this._hass = hass;
+    if (this._initialized && this._config.theme_mode === "auto" && this._isDarkMode() !== wasDark) {
+      this._applyThemeColors();
+    }
     if (this._initialized) this._updateMarkers();
   }
   connectedCallback() {
@@ -4477,6 +4661,7 @@ var NPSParksCard = class extends HTMLElement {
   disconnectedCallback() {
     this._projection = null;
     this._markers = {};
+    this._lastEntities = null;
     this._initialized = false;
     this._panelOpen = false;
     this.shadowRoot.innerHTML = "";
@@ -4654,6 +4839,8 @@ var NPSParksCard = class extends HTMLElement {
         .no-parks { padding:20px; text-align:center; color: var(--secondary-text-color, #888); font-size:13px; }
       </style>
 
+      <style id="theme-vars"></style>
+
       <div id="map-wrap">
         <svg id="us-map"
              viewBox="0 0 ${SVG_W} ${SVG_H}"
@@ -4696,15 +4883,46 @@ var NPSParksCard = class extends HTMLElement {
     this._initialized = true;
     if (this._hass) this._updateMarkers();
   }
-  // ── Config application (live-updatable, no full rebuild needed) ──────────
-  _applyConfig() {
-    const noBg = this._config.show_background === false;
-    this.style.setProperty("--nps-ocean-color", noBg ? "transparent" : this._config.background_color);
+  // ── Theming ────────────────────────────────────────────────────────────────
+  // Resolves theme_mode ('auto' | 'light' | 'dark') to an actual
+  // light/dark decision. 'auto' follows Home Assistant's own dark mode
+  // flag so the card matches the dashboard without any extra config.
+  _isDarkMode() {
+    const mode = this._config.theme_mode;
+    if (mode === "light") return false;
+    if (mode === "dark") return true;
+    return !!(this._hass && this._hass.themes && this._hass.themes.darkMode);
+  }
+  // Pushes the resolved light/dark map colors in as CSS custom
+  // properties on the host element. Custom properties inherit through
+  // the shadow boundary, so the shadow tree's own stylesheet (.state,
+  // .territory, :host background) picks these up automatically —
+  // nothing inside the shadow root needs to be touched or rebuilt.
+  _applyThemeColors() {
+    const c = this._config;
+    const dark = this._isDarkMode();
+    const background = dark ? c.dark_background_color : c.light_background_color;
+    const land = dark ? c.dark_land_color : c.light_land_color;
+    const border = dark ? c.dark_border_color : c.light_border_color;
+    const coastline = dark ? c.dark_coastline_color : c.light_coastline_color;
+    const noBg = c.show_background === false;
+    this.style.setProperty("--nps-ocean-color", noBg ? "transparent" : background);
     if (noBg) this.style.setProperty("--nps-card-shadow", "none");
     else this.style.removeProperty("--nps-card-shadow");
+    const themeVarsEl = this.shadowRoot?.getElementById("theme-vars");
+    if (themeVarsEl) {
+      themeVarsEl.textContent = `
+                .state { fill: ${land}; stroke: ${border}; }
+                .territory { fill: ${land}; stroke: ${coastline}; }
+                .nation-border { stroke: ${coastline}; }
+            `;
+    }
+  }
+  // ── Config application (live-updatable, no full rebuild needed) ──────────
+  _applyConfig() {
+    this._applyThemeColors();
     if (this._initialized) {
-      Object.values(this._markers).forEach(({ el }) => el.remove());
-      this._markers = {};
+      this._lastEntities = null;
       if (this._hass) this._updateMarkers();
     }
   }
@@ -4747,6 +4965,10 @@ var NPSParksCard = class extends HTMLElement {
     const iconLayer = this.shadowRoot.querySelector("#icon-layer");
     if (!markerGroup || !iconLayer) return;
     const entities = this._getParkEntities();
+    if (this._lastEntities && entities.length === this._lastEntities.size && entities.every((e) => this._lastEntities.get(e.attributes.park_code) === e)) {
+      return;
+    }
+    this._lastEntities = new Map(entities.map((e) => [e.attributes.park_code, e]));
     const seen = /* @__PURE__ */ new Set();
     entities.forEach((entity) => {
       const code = entity.attributes.park_code;
@@ -4835,19 +5057,20 @@ var NPSParksCard = class extends HTMLElement {
     const a = entity.attributes;
     const isVisited = entity.state === "visited";
     const img = a.image;
-    const desc = (a.description || "").slice(0, 220);
+    const rawDesc = a.description || "";
+    const desc = rawDesc.slice(0, 220);
     const meta = [a.designation, a.states].filter(Boolean).join(" \u2022 ");
     this.shadowRoot.querySelector("#popup-content").innerHTML = `
-      ${img ? `<img class="popup-img" src="${img.url}" alt="${img.alt_text || ""}">` : ""}
+      ${img ? `<img class="popup-img" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt_text || "")}">` : ""}
       <div class="popup-body">
-        <div class="popup-name">${a.friendly_name || entity.entity_id}</div>
-        ${meta ? `<div class="popup-meta">${meta}</div>` : ""}
-        <div class="popup-desc">${desc.length === 220 ? desc + "\u2026" : desc}</div>
-        ${a.url ? `<a class="popup-link" href="${a.url}" target="_blank" rel="noopener"
+        <div class="popup-name">${escapeHtml(a.friendly_name || entity.entity_id)}</div>
+        ${meta ? `<div class="popup-meta">${escapeHtml(meta)}</div>` : ""}
+        <div class="popup-desc">${escapeHtml(desc)}${rawDesc.length > 220 ? "\u2026" : ""}</div>
+        ${a.url ? `<a class="popup-link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener"
             style="color:${this._config.visited_color}">Learn more \u2192</a>` : ""}
         <button class="popup-toggle"
           style="background:${isVisited ? "#c0392b" : this._config.visited_color}"
-          data-code="${code}" data-state="${entity.state}">
+          data-code="${escapeHtml(code)}" data-state="${escapeHtml(entity.state)}">
           ${isVisited ? "\u2713 Visited \u2014 Mark Unvisited" : "Mark as Visited"}
         </button>
       </div>
@@ -4915,10 +5138,10 @@ var NPSParksCard = class extends HTMLElement {
         <div class="park-row">
           <div class="park-dot" style="background:${color}"></div>
           <div style="flex:1;min-width:0">
-            <div class="park-name">${name}</div>
-            <div class="park-desig">${desig}</div>
+            <div class="park-name">${escapeHtml(name)}</div>
+            <div class="park-desig">${escapeHtml(desig)}</div>
           </div>
-          <button class="park-btn" data-code="${code}" data-state="${e.state}"
+          <button class="park-btn" data-code="${escapeHtml(code)}" data-state="${escapeHtml(e.state)}"
             style="background:${isVisited ? "#c0392b" : this._config.visited_color}">
             ${isVisited ? "Unvisit" : "Visit"}
           </button>
@@ -4938,7 +5161,198 @@ var NPSParksCard = class extends HTMLElement {
     const height = renderedHeight || 420 * (SVG_H / SVG_W);
     return Math.max(1, Math.round(height / 50));
   }
+  // A custom editor element (rather than the schema-only getConfigForm
+  // API) so unset options can display their live defaults instead of
+  // blank fields — ha-form only shows what's literally in the data it's
+  // given, and getConfigForm gives no hook to inject merged defaults.
+  static getConfigElement() {
+    return document.createElement("nps-parks-card-editor");
+  }
 };
+var NPSParksCardEditor = class extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    if (this._form) this._form.hass = hass;
+    if (this._markerForms) {
+      for (const group of MARKER_GROUPS) this._markerForms[group.key].hass = hass;
+    }
+  }
+  _render() {
+    if (!this._built) this._build();
+    if (this._hass) {
+      this._form.hass = this._hass;
+      for (const group of MARKER_GROUPS) this._markerForms[group.key].hass = this._hass;
+    }
+    const flat = flattenConfig(this._config);
+    const merged = { ...optionDefaults(flat) };
+    for (const key of Object.keys(merged)) {
+      if (flat[key] !== void 0 && flat[key] !== null && flat[key] !== "") {
+        merged[key] = flat[key];
+      }
+    }
+    const data = {};
+    for (const key of MAIN_FORM_KEYS) {
+      const section = OPTION_SECTION[key];
+      if (section) (data[section] = data[section] || {})[key] = merged[key];
+      else data[key] = merged[key];
+    }
+    this._form.schema = FORM_SCHEMA;
+    this._form.data = data;
+    for (const group of MARKER_GROUPS) {
+      const gdata = {};
+      for (const field of group.fields) gdata[field.name] = merged[field.name];
+      const form = this._markerForms[group.key];
+      form.schema = group.fields;
+      form.data = gdata;
+    }
+    for (const [key, input] of Object.entries(this._colorInputs)) {
+      const v = merged[key];
+      input.value = typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : "#000000";
+    }
+  }
+  _build() {
+    this._built = true;
+    this._colorInputs = {};
+    this._markerForms = {};
+    const style = document.createElement("style");
+    style.textContent = `
+            .nps-color-group { margin-top: 12px; }
+            .nps-color-rows { padding: 4px 16px 12px; }
+            .nps-color-row {
+                display: flex; align-items: center; justify-content: space-between;
+                padding: 6px 0;
+            }
+            .nps-color-row label {
+                color: var(--primary-text-color);
+                font-size: 14px;
+            }
+            .nps-color-row input[type="color"] {
+                width: 52px; height: 32px; padding: 2px;
+                border: 1px solid var(--divider-color, #ccc);
+                border-radius: 6px;
+                background: var(--card-background-color, #fff);
+                cursor: pointer;
+            }
+        `;
+    this.appendChild(style);
+    this._form = document.createElement("ha-form");
+    this._form.computeLabel = (schema) => schema.title || (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, " ");
+    this._form.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
+      this._formChanged(ev.detail.value);
+    });
+    this.appendChild(this._form);
+    for (const group of MARKER_GROUPS) {
+      const panel = document.createElement("ha-expansion-panel");
+      panel.className = "nps-color-group";
+      panel.outlined = true;
+      panel.header = group.title;
+      const form = document.createElement("ha-form");
+      form.computeLabel = (schema) => schema.title || (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, " ");
+      form.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        this._markerFormChanged(group, ev.detail.value);
+      });
+      panel.appendChild(form);
+      this._markerForms[group.key] = form;
+      const rows = document.createElement("div");
+      rows.className = "nps-color-rows";
+      rows.appendChild(this._buildColorRow(group.colorKey, group.colorLabel));
+      panel.appendChild(rows);
+      this.appendChild(panel);
+    }
+    for (const group of COLOR_GROUPS) {
+      const panel = document.createElement("ha-expansion-panel");
+      panel.className = "nps-color-group";
+      panel.outlined = true;
+      panel.header = group.title;
+      const rows = document.createElement("div");
+      rows.className = "nps-color-rows";
+      for (const [key, label] of group.keys) rows.appendChild(this._buildColorRow(key, label));
+      panel.appendChild(rows);
+      this.appendChild(panel);
+    }
+  }
+  // Builds one label-left / swatch-right color row and registers its
+  // input in this._colorInputs, keyed by option name (shared by both
+  // MARKER_GROUPS and COLOR_GROUPS panels).
+  _buildColorRow(key, label) {
+    const row = document.createElement("div");
+    row.className = "nps-color-row";
+    const labelEl = document.createElement("label");
+    labelEl.textContent = label;
+    const input = document.createElement("input");
+    input.type = "color";
+    input.addEventListener("input", (e) => this._colorChanged(key, e.target.value));
+    row.appendChild(labelEl);
+    row.appendChild(input);
+    this._colorInputs[key] = input;
+    return row;
+  }
+  // ha-form fired: fold its (nested) values into the flat working config.
+  // Take form-managed keys from the form verbatim — including cleared
+  // ones — so e.g. removing an icon actually unsets it.
+  _formChanged(value) {
+    const formFlat = flattenConfig(value);
+    const flat = flattenConfig(this._config);
+    for (const key of MAIN_FORM_KEYS) {
+      if (formFlat[key] === void 0) delete flat[key];
+      else flat[key] = formFlat[key];
+    }
+    this._commit(flat);
+  }
+  // Same as _formChanged, but scoped to one marker group's own fields —
+  // each marker panel has its own ha-form instance, so a change in one
+  // must not be read as "everything else was cleared".
+  _markerFormChanged(group, value) {
+    const formFlat = flattenConfig(value);
+    const flat = flattenConfig(this._config);
+    for (const field of group.fields) {
+      const key = field.name;
+      if (formFlat[key] === void 0) delete flat[key];
+      else flat[key] = formFlat[key];
+    }
+    this._commit(flat);
+  }
+  _colorChanged(key, value) {
+    const flat = flattenConfig(this._config);
+    flat[key] = value;
+    this._commit(flat);
+  }
+  // Strip anything equal to its (preset-aware) default, re-nest
+  // form-managed options into their sections, keep colors flat, preserve
+  // all non-option keys (type, view_layout, legacy marker_radius, …).
+  _commit(flat) {
+    const defaults = optionDefaults(flat);
+    const out = {};
+    for (const [key, v] of Object.entries(this._config)) {
+      if (key in defaults || ALL_SECTION_NAMES.includes(key)) continue;
+      out[key] = v;
+    }
+    for (const key of Object.keys(defaults)) {
+      const v = flat[key];
+      if (v === void 0 || v === null || v === "") continue;
+      if (optionEquals(v, defaults[key])) continue;
+      const section = OPTION_SECTION[key];
+      if (section) (out[section] = out[section] || {})[key] = v;
+      else out[key] = v;
+    }
+    this._config = out;
+    this._render();
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: out },
+      bubbles: true,
+      composed: true
+    }));
+  }
+};
+if (!customElements.get("nps-parks-card-editor")) {
+  customElements.define("nps-parks-card-editor", NPSParksCardEditor);
+}
 if (!customElements.get("nps-parks-card")) {
   customElements.define("nps-parks-card", NPSParksCard);
 }
