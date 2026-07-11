@@ -28,10 +28,11 @@ CI also runs HACS repository validation (`validate-hacs` job) via `hacs/action`.
 
 ## Architecture
 
-Everything lives in one file: `src/nps-parks-card.js` (~1150 lines), bundled by esbuild into `dist/nps-parks-card.js`. It defines two custom elements and registers them at the bottom of the file:
+`src/` is bundled by esbuild, starting from the `src/nps-parks-card.js` entry point, into the single `dist/nps-parks-card.js` file HACS/Home Assistant actually serves. The entry point itself is thin — it just imports the two custom elements below and registers them (plus the `window.customCards` picker entry):
 
-- **`nps-parks-card`** (`NPSParksCard`) — the card itself.
-- **`nps-parks-card-editor`** (`NPSParksCardEditor`) — the visual config editor, returned by `NPSParksCard.getConfigElement()`.
+- **`src/card.js`** — `NPSParksCard`, the card itself (`nps-parks-card`).
+- **`src/editor.js`** — `NPSParksCardEditor`, the visual config editor (`nps-parks-card-editor`), returned by `NPSParksCard.getConfigElement()`. Communicates with the card only via the custom-elements registry (`document.createElement('nps-parks-card-editor')`), not a direct import, so the two have no compile-time dependency on each other.
+- **`src/config-schema.js`** — the config schema, defaults, and flat/sectioned config conversion (`FORM_SCHEMA`, `MARKER_GROUPS`, `COLOR_GROUPS`, `optionDefaults()`, `flattenConfig()`, etc.) that both `card.js` and `editor.js` import. Pure data/logic, no DOM.
 
 ### Map rendering
 
@@ -45,7 +46,7 @@ Markers are either plain SVG `<circle>` elements (in the `#markers` SVG group) o
 
 ### Config shape and the editor
 
-Config is normalized to a **flat** object at the top level (colors, sizes, icons, `theme_mode`, `color_preset`, etc.) — this is what `NPSParksCard` actually reads at render time. `FORM_SCHEMA` (used by `ha-form` in the editor) organizes some of those same flat keys into named `grid`/`expandable` sections for UI purposes; `OPTION_SECTION` is auto-derived from `FORM_SCHEMA` by `indexSchema()` so the section↔flat-key mapping can't drift out of sync. `flattenConfig()` lifts section-nested values back to flat on read (`setConfig`, editor `_render`/`_formChanged`); the editor re-nests on write.
+Config is normalized to a **flat** object at the top level (colors, sizes, icons, `theme_mode`, `color_preset`, etc.) — this is what `NPSParksCard` actually reads at render time. `FORM_SCHEMA` (used by `ha-form` in the editor) organizes some of those same flat keys into named `grid`/`expandable` sections for UI purposes; `OPTION_SECTION` is auto-derived from `FORM_SCHEMA` by `indexSchema()` so the section↔flat-key mapping can't drift out of sync. `flattenConfig()` lifts section-nested values back to flat on read (`setConfig`, editor `_render`/`_syncFormKeys`); the editor re-nests on write.
 
 Color options (background/land/border/coastline per light+dark theme, plus marker colors) are *not* in `FORM_SCHEMA` — `ha-form`'s built-in color selector paints its swatch over the label in a way that doesn't fit this editor's layout, so `COLOR_GROUPS` drives a hand-rolled set of `<input type="color">` rows instead, built and updated directly in `NPSParksCardEditor._build()`/`_render()`.
 
@@ -64,4 +65,4 @@ Several old flat options are still honored as fallbacks and must keep working:
 
 ### Popup and panel
 
-The detail popup (`_showPopup`) is laid out invisibly first to measure real content size (image/description/meta vary in length) before positioning, to avoid clipping by `#map-wrap`'s `overflow: hidden`. The slide-in park browser panel (`_openPanel`/`_renderParkList`) is a searchable list of all tracked park entities, independent of the map/markers.
+The detail popup (`_showPopup`, split into `_renderPopupContent()` + `_positionPopup()`) is laid out invisibly first to measure real content size (image/description/meta vary in length) before positioning, to avoid clipping by `#map-wrap`'s `overflow: hidden`. The slide-in park browser panel (`_openPanel`/`_renderParkList`) is a searchable list of all tracked park entities, independent of the map/markers.

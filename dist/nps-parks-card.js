@@ -4213,7 +4213,7 @@ function select_default2(selector) {
   return typeof selector === "string" ? new Selection([[document.querySelector(selector)]], [document.documentElement]) : new Selection([[selector]], root);
 }
 
-// src/nps-parks-card.js
+// src/card.js
 var import_d3_geo = __toESM(require_d3_geo(), 1);
 
 // node_modules/topojson-client/src/identity.js
@@ -4426,11 +4426,10 @@ function extractArcs(topology, object2, filter2) {
   return arcs;
 }
 
-// src/nps-parks-card.js
+// src/card.js
 var import_geo_albers_usa_territories = __toESM(require_geo_albers_usa_territories(), 1);
-var US_ATLAS_URL = "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json";
-var SVG_W = 960;
-var SVG_H = 600;
+
+// src/config-schema.js
 var PRESETS = {
   classic: {
     light: { background: "#c9d8e8", land: "#ede9dc", border: "#ffffff", coastline: "#c0b898" },
@@ -4528,17 +4527,16 @@ var COLOR_GROUPS = [
     ]
   }
 ];
-var OPTION_SECTION = {};
-(function indexSchema(schema, parent) {
+function indexSchema(target, schema, parent) {
   for (const item of schema) {
-    if (item.schema) indexSchema(item.schema, item.name || parent);
-    else OPTION_SECTION[item.name] = parent || null;
+    if (item.schema) indexSchema(target, item.schema, item.name || parent);
+    else target[item.name] = parent || null;
   }
-})(FORM_SCHEMA, null);
-var MAIN_FORM_KEYS = Object.keys(OPTION_SECTION);
-for (const group of MARKER_GROUPS) {
-  for (const field of group.fields) OPTION_SECTION[field.name] = null;
 }
+var OPTION_SECTION = {};
+indexSchema(OPTION_SECTION, FORM_SCHEMA, null);
+var MAIN_FORM_KEYS = Object.keys(OPTION_SECTION);
+for (const group of MARKER_GROUPS) indexSchema(OPTION_SECTION, group.fields, null);
 var SECTION_NAMES = [...new Set(Object.values(OPTION_SECTION).filter(Boolean))];
 var LEGACY_SECTION_NAMES = ["light_theme_colors", "dark_theme_colors", "visited_marker", "unvisited_marker"];
 var ALL_SECTION_NAMES = [...SECTION_NAMES, ...LEGACY_SECTION_NAMES];
@@ -4567,14 +4565,8 @@ function optionDefaults(flat) {
     unvisited_color: "#9a9a9a"
   };
 }
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  })[ch]);
+function computeFieldLabel(schema) {
+  return schema.title || (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, " ");
 }
 function optionEquals(a, b) {
   if (typeof a === "string" && typeof b === "string") {
@@ -4593,82 +4585,16 @@ function flattenConfig(config) {
   }
   return flat;
 }
-var NPSParksCard = class extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: "open" });
-    this._hass = null;
-    this._config = {};
-    this._projection = null;
-    this._markers = {};
-    this._lastEntities = null;
-    this._initialized = false;
-    this._panelOpen = false;
-    this._search = "";
-  }
-  static getStubConfig() {
-    return {};
-  }
-  setConfig(config) {
-    config = flattenConfig(config);
-    const legacyRadius = config.marker_radius;
-    const legacySize = config.marker_size;
-    const defaultSize = legacyRadius ? legacyRadius * 2 : legacySize || 12;
-    const preset = PRESETS[config.color_preset] || PRESETS[DEFAULT_PRESET];
-    this._config = {
-      visited_color: "#2D6A4F",
-      unvisited_color: "#9a9a9a",
-      visited_opacity: 1,
-      unvisited_opacity: 0.75,
-      visited_marker_size: defaultSize,
-      unvisited_marker_size: defaultSize,
-      visited_icon: "mdi:pine-tree",
-      unvisited_icon: null,
-      // e.g. 'mdi:circle-outline' — null = plain dot
-      // Which color set to render with. 'auto' follows Home
-      // Assistant's own light/dark mode; 'light'/'dark' pin it.
-      theme_mode: "auto",
-      color_preset: DEFAULT_PRESET,
-      // Map colors, seeded from the chosen preset and individually
-      // overridable per theme.
-      show_background: true,
-      light_background_color: preset.light.background,
-      light_land_color: preset.light.land,
-      light_border_color: preset.light.border,
-      light_coastline_color: preset.light.coastline,
-      dark_background_color: preset.dark.background,
-      dark_land_color: preset.dark.land,
-      dark_border_color: preset.dark.border,
-      dark_coastline_color: preset.dark.coastline,
-      ...config
-    };
-    if (config.background_color && !config.light_background_color) {
-      this._config.light_background_color = config.background_color;
-    }
-    if (this._initialized) this._applyConfig();
-  }
-  set hass(hass) {
-    const wasDark = this._initialized && this._config.theme_mode === "auto" ? this._isDarkMode() : null;
-    this._hass = hass;
-    if (this._initialized && this._config.theme_mode === "auto" && this._isDarkMode() !== wasDark) {
-      this._applyThemeColors();
-    }
-    if (this._initialized) this._updateMarkers();
-  }
-  connectedCallback() {
-    if (!this._initialized) this._init();
-  }
-  disconnectedCallback() {
-    this._projection = null;
-    this._markers = {};
-    this._lastEntities = null;
-    this._initialized = false;
-    this._panelOpen = false;
-    this.shadowRoot.innerHTML = "";
-  }
-  async _init() {
-    const topoData = await fetch(US_ATLAS_URL).then((r) => r.json());
-    this.shadowRoot.innerHTML = `
+
+// src/card.js
+var US_ATLAS_URL = "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json";
+var SVG_W = 960;
+var SVG_H = 600;
+var UNVISIT_COLOR = "#c0392b";
+var POPUP_OFFSET_X = 12;
+var POPUP_OFFSET_Y = 70;
+var POPUP_EDGE_MARGIN = 8;
+var CARD_TEMPLATE = `
       <style>
         :host {
           display: block;
@@ -4868,6 +4794,98 @@ var NPSParksCard = class extends HTMLElement {
         <div id="park-list"></div>
       </div>
     `;
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[ch]);
+}
+var NPSParksCard = class extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._hass = null;
+    this._config = {};
+    this._projection = null;
+    this._markers = {};
+    this._lastEntities = null;
+    this._initialized = false;
+    this._panelOpen = false;
+    this._search = "";
+  }
+  static getStubConfig() {
+    return {};
+  }
+  setConfig(config) {
+    config = flattenConfig(config);
+    const legacyRadius = config.marker_radius;
+    const legacySize = config.marker_size;
+    const defaultSize = legacyRadius ? legacyRadius * 2 : legacySize || 12;
+    const preset = PRESETS[config.color_preset] || PRESETS[DEFAULT_PRESET];
+    this._config = {
+      visited_color: "#2D6A4F",
+      unvisited_color: "#9a9a9a",
+      visited_opacity: 1,
+      unvisited_opacity: 0.75,
+      visited_marker_size: defaultSize,
+      unvisited_marker_size: defaultSize,
+      visited_icon: "mdi:pine-tree",
+      unvisited_icon: null,
+      // e.g. 'mdi:circle-outline' — null = plain dot
+      // Which color set to render with. 'auto' follows Home
+      // Assistant's own light/dark mode; 'light'/'dark' pin it.
+      theme_mode: "auto",
+      color_preset: DEFAULT_PRESET,
+      // Map colors, seeded from the chosen preset and individually
+      // overridable per theme.
+      show_background: true,
+      light_background_color: preset.light.background,
+      light_land_color: preset.light.land,
+      light_border_color: preset.light.border,
+      light_coastline_color: preset.light.coastline,
+      dark_background_color: preset.dark.background,
+      dark_land_color: preset.dark.land,
+      dark_border_color: preset.dark.border,
+      dark_coastline_color: preset.dark.coastline,
+      ...config
+    };
+    if (config.background_color && !config.light_background_color) {
+      this._config.light_background_color = config.background_color;
+    }
+    if (this._initialized) this._applyConfig();
+  }
+  set hass(hass) {
+    const wasDark = this._initialized && this._config.theme_mode === "auto" ? this._isDarkMode() : null;
+    this._hass = hass;
+    if (this._initialized && this._config.theme_mode === "auto" && this._isDarkMode() !== wasDark) {
+      this._applyThemeColors();
+    }
+    if (this._initialized) this._updateMarkers();
+  }
+  connectedCallback() {
+    if (!this._initialized) this._init();
+  }
+  disconnectedCallback() {
+    this._projection = null;
+    this._markers = {};
+    this._lastEntities = null;
+    this._initialized = false;
+    this._panelOpen = false;
+    this.shadowRoot.innerHTML = "";
+  }
+  async _init() {
+    const topoData = await fetch(US_ATLAS_URL).then((r) => r.json());
+    this.shadowRoot.innerHTML = CARD_TEMPLATE;
+    this._wireEvents();
+    this._applyConfig();
+    this._renderMap(topoData);
+    this._initialized = true;
+    if (this._hass) this._updateMarkers();
+  }
+  _wireEvents() {
     this.shadowRoot.querySelector("#panel-btn").addEventListener("click", () => this._togglePanel());
     this.shadowRoot.querySelector(".panel-close").addEventListener("click", () => this._closePanel());
     this.shadowRoot.querySelector("#search-input").addEventListener("input", (e) => {
@@ -4878,10 +4896,6 @@ var NPSParksCard = class extends HTMLElement {
     this.shadowRoot.querySelector("#map-wrap").addEventListener("click", (e) => {
       if (!e.target.closest("[data-park-code]")) this._hidePopup();
     });
-    this._applyConfig();
-    this._renderMap(topoData);
-    this._initialized = true;
-    if (this._hass) this._updateMarkers();
   }
   // ── Theming ────────────────────────────────────────────────────────────────
   // Resolves theme_mode ('auto' | 'light' | 'dark') to an actual
@@ -4947,6 +4961,15 @@ var NPSParksCard = class extends HTMLElement {
     if (!this._hass) return [];
     return Object.values(this._hass.states).filter(
       (e) => e.attributes.park_code != null && e.attributes.latitude != null && e.attributes.longitude != null && (e.state === "visited" || e.state === "unvisited")
+    );
+  }
+  // Flips a park's visited state via the ha-nps-parks integration.
+  // Shared by the popup's toggle button and the park-list row buttons.
+  _toggleVisited(code, currentState) {
+    this._hass.callService(
+      "nps_parks",
+      currentState === "visited" ? "mark_unvisited" : "mark_visited",
+      { park_code: code }
     );
   }
   // ── Marker management ─────────────────────────────────────────────────────
@@ -5054,6 +5077,10 @@ var NPSParksCard = class extends HTMLElement {
   _showPopup(code, svgX, svgY) {
     const entity = this._getParkEntities().find((e) => e.attributes.park_code === code);
     if (!entity) return;
+    this._renderPopupContent(entity, code);
+    this._positionPopup(svgX, svgY);
+  }
+  _renderPopupContent(entity, code) {
     const a = entity.attributes;
     const isVisited = entity.state === "visited";
     const img = a.image;
@@ -5069,7 +5096,7 @@ var NPSParksCard = class extends HTMLElement {
         ${a.url ? `<a class="popup-link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener"
             style="color:${this._config.visited_color}">Learn more \u2192</a>` : ""}
         <button class="popup-toggle"
-          style="background:${isVisited ? "#c0392b" : this._config.visited_color}"
+          style="background:${isVisited ? UNVISIT_COLOR : this._config.visited_color}"
           data-code="${escapeHtml(code)}" data-state="${escapeHtml(entity.state)}">
           ${isVisited ? "\u2713 Visited \u2014 Mark Unvisited" : "Mark as Visited"}
         </button>
@@ -5077,9 +5104,17 @@ var NPSParksCard = class extends HTMLElement {
     `;
     this.shadowRoot.querySelector(".popup-toggle").addEventListener("click", (e) => {
       const { code: c, state } = e.currentTarget.dataset;
-      this._hass.callService("nps_parks", state === "visited" ? "mark_unvisited" : "mark_visited", { park_code: c });
+      this._toggleVisited(c, state);
       this._hidePopup();
     });
+  }
+  // Positions the popup near the clicked marker (svgX/svgY are in SVG
+  // viewBox coordinates), clamped so it never runs past #map-wrap's
+  // edges. Popup content length varies (description, image, meta), so
+  // this lays it out invisibly first to measure its real rendered size
+  // rather than guessing — a guessed size can let long popups get
+  // clipped by #map-wrap's overflow.
+  _positionPopup(svgX, svgY) {
     const popup = this.shadowRoot.querySelector("#popup");
     const svgEl = this.shadowRoot.querySelector("#us-map");
     const wrapEl = this.shadowRoot.querySelector("#map-wrap");
@@ -5091,14 +5126,16 @@ var NPSParksCard = class extends HTMLElement {
     const wrapRect = wrapEl.getBoundingClientRect();
     const sx = svgRect.width / SVG_W;
     const sy = svgRect.height / SVG_H;
-    let px = svgRect.left - wrapRect.left + svgX * sx + 12;
-    let py = svgRect.top - wrapRect.top + svgY * sy - 70;
-    const maxX = wrapRect.width - popW - 8;
-    const maxY = wrapRect.height - popH - 8;
-    if (px > maxX) px = svgX * sx - popW - 12 + (svgRect.left - wrapRect.left);
-    if (px < 8) px = 8;
+    const originX = svgRect.left - wrapRect.left;
+    const originY = svgRect.top - wrapRect.top;
+    let px = originX + svgX * sx + POPUP_OFFSET_X;
+    let py = originY + svgY * sy - POPUP_OFFSET_Y;
+    const maxX = wrapRect.width - popW - POPUP_EDGE_MARGIN;
+    const maxY = wrapRect.height - popH - POPUP_EDGE_MARGIN;
+    if (px > maxX) px = originX + svgX * sx - popW - POPUP_OFFSET_X;
+    if (px < POPUP_EDGE_MARGIN) px = POPUP_EDGE_MARGIN;
     if (py > maxY) py = maxY;
-    if (py < 8) py = 8;
+    if (py < POPUP_EDGE_MARGIN) py = POPUP_EDGE_MARGIN;
     popup.style.left = px + "px";
     popup.style.top = py + "px";
     popup.style.visibility = "";
@@ -5142,7 +5179,7 @@ var NPSParksCard = class extends HTMLElement {
             <div class="park-desig">${escapeHtml(desig)}</div>
           </div>
           <button class="park-btn" data-code="${escapeHtml(code)}" data-state="${escapeHtml(e.state)}"
-            style="background:${isVisited ? "#c0392b" : this._config.visited_color}">
+            style="background:${isVisited ? UNVISIT_COLOR : this._config.visited_color}">
             ${isVisited ? "Unvisit" : "Visit"}
           </button>
         </div>
@@ -5151,7 +5188,7 @@ var NPSParksCard = class extends HTMLElement {
     list.querySelectorAll(".park-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const { code, state } = e.currentTarget.dataset;
-        this._hass.callService("nps_parks", state === "visited" ? "mark_unvisited" : "mark_visited", { park_code: code });
+        this._toggleVisited(code, state);
       });
     });
   }
@@ -5169,6 +5206,8 @@ var NPSParksCard = class extends HTMLElement {
     return document.createElement("nps-parks-card-editor");
   }
 };
+
+// src/editor.js
 var NPSParksCardEditor = class extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
@@ -5240,10 +5279,10 @@ var NPSParksCardEditor = class extends HTMLElement {
         `;
     this.appendChild(style);
     this._form = document.createElement("ha-form");
-    this._form.computeLabel = (schema) => schema.title || (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, " ");
+    this._form.computeLabel = computeFieldLabel;
     this._form.addEventListener("value-changed", (ev) => {
       ev.stopPropagation();
-      this._formChanged(ev.detail.value);
+      this._syncFormKeys(MAIN_FORM_KEYS, ev.detail.value);
     });
     this.appendChild(this._form);
     for (const group of MARKER_GROUPS) {
@@ -5252,10 +5291,10 @@ var NPSParksCardEditor = class extends HTMLElement {
       panel.outlined = true;
       panel.header = group.title;
       const form = document.createElement("ha-form");
-      form.computeLabel = (schema) => schema.title || (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, " ");
+      form.computeLabel = computeFieldLabel;
       form.addEventListener("value-changed", (ev) => {
         ev.stopPropagation();
-        this._markerFormChanged(group, ev.detail.value);
+        this._syncFormKeys(group.fields.map((f) => f.name), ev.detail.value);
       });
       panel.appendChild(form);
       this._markerForms[group.key] = form;
@@ -5293,26 +5332,17 @@ var NPSParksCardEditor = class extends HTMLElement {
     this._colorInputs[key] = input;
     return row;
   }
-  // ha-form fired: fold its (nested) values into the flat working config.
-  // Take form-managed keys from the form verbatim — including cleared
-  // ones — so e.g. removing an icon actually unsets it.
-  _formChanged(value) {
+  // A ha-form instance fired value-changed: fold its (nested) values into
+  // the flat working config, scoped to just the keys that form instance
+  // owns — the editor has several separate ha-form instances (the main
+  // form plus one per marker group), so a change in one must not be read
+  // as "every other form's fields were cleared". Takes form-managed keys
+  // verbatim — including cleared ones — so e.g. removing an icon
+  // actually unsets it.
+  _syncFormKeys(keys, value) {
     const formFlat = flattenConfig(value);
     const flat = flattenConfig(this._config);
-    for (const key of MAIN_FORM_KEYS) {
-      if (formFlat[key] === void 0) delete flat[key];
-      else flat[key] = formFlat[key];
-    }
-    this._commit(flat);
-  }
-  // Same as _formChanged, but scoped to one marker group's own fields —
-  // each marker panel has its own ha-form instance, so a change in one
-  // must not be read as "everything else was cleared".
-  _markerFormChanged(group, value) {
-    const formFlat = flattenConfig(value);
-    const flat = flattenConfig(this._config);
-    for (const field of group.fields) {
-      const key = field.name;
+    for (const key of keys) {
       if (formFlat[key] === void 0) delete flat[key];
       else flat[key] = formFlat[key];
     }
@@ -5350,6 +5380,8 @@ var NPSParksCardEditor = class extends HTMLElement {
     }));
   }
 };
+
+// src/nps-parks-card.js
 if (!customElements.get("nps-parks-card-editor")) {
   customElements.define("nps-parks-card-editor", NPSParksCardEditor);
 }
