@@ -97,23 +97,30 @@ const FORM_SCHEMA = [
         name: "show_background",
         selector: { boolean: {} },
     },
+];
+
+// Marker settings (icon/size/opacity) render in their own dedicated ha-form
+// per state, rather than as an "expandable" block inside FORM_SCHEMA, so
+// that the marker color row (hand-rolled — see COLOR_GROUPS below) can sit
+// inside the same expansion panel, directly under those fields.
+const MARKER_GROUPS = [
     {
-        type: "expandable",
-        name: "visited_marker",
-        title: "Visited marker",
-        icon: "mdi:map-marker-check",
-        schema: [
+        key: 'visited',
+        title: 'Visited marker',
+        colorKey: 'visited_color',
+        colorLabel: 'Marker color',
+        fields: [
             { name: "visited_icon", selector: { icon: {} } },
             { name: "visited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
             { name: "visited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
         ],
     },
     {
-        type: "expandable",
-        name: "unvisited_marker",
-        title: "Unvisited marker",
-        icon: "mdi:map-marker-outline",
-        schema: [
+        key: 'unvisited',
+        title: 'Unvisited marker',
+        colorKey: 'unvisited_color',
+        colorLabel: 'Marker color',
+        fields: [
             { name: "unvisited_icon", selector: { icon: {} } },
             { name: "unvisited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
             { name: "unvisited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
@@ -124,7 +131,8 @@ const FORM_SCHEMA = [
 // Color options aren't in FORM_SCHEMA: ha-form's text/color selector paints
 // the swatch over its own label, so the editor renders these itself as
 // label-left / swatch-right rows, grouped as below. Values are stored flat
-// at the top level of the config.
+// at the top level of the config. (Marker colors render inside the
+// MARKER_GROUPS panels above instead of here.)
 const COLOR_GROUPS = [
     {
         title: 'Light theme colors',
@@ -144,19 +152,14 @@ const COLOR_GROUPS = [
             ['dark_coastline_color', 'Coastline'],
         ],
     },
-    {
-        title: 'Marker colors',
-        keys: [
-            ['visited_color', 'Visited'],
-            ['unvisited_color', 'Unvisited'],
-        ],
-    },
 ];
 
 // Map of leaf option name → containing section name (or null for top-level),
 // derived from the schema so the two can't drift apart. Used to nest/flatten
 // config between the flat shape the card reads and the sectioned shape
-// ha-form reads/writes (named grid/expandable sections are data paths).
+// ha-form reads/writes (named grid sections are data paths). Covers only
+// FORM_SCHEMA — the fields rendered by MARKER_GROUPS' own per-state forms
+// aren't nested under any section, same as colors.
 const OPTION_SECTION = {};
 (function indexSchema(schema, parent) {
     for (const item of schema) {
@@ -165,11 +168,22 @@ const OPTION_SECTION = {};
     }
 })(FORM_SCHEMA, null);
 
+// Keys the main ha-form (FORM_SCHEMA) itself owns — kept distinct from the
+// marker-group fields added to OPTION_SECTION next, since the two live in
+// separate ha-form instances and must not sync into each other's data.
+const MAIN_FORM_KEYS = Object.keys(OPTION_SECTION);
+
+for (const group of MARKER_GROUPS) {
+    for (const field of group.fields) OPTION_SECTION[field.name] = null;
+}
+
 const SECTION_NAMES = [...new Set(Object.values(OPTION_SECTION).filter(Boolean))];
 
 // Configs saved by earlier versions of this editor nested colors under
-// these section names; still unwrap them on read.
-const LEGACY_SECTION_NAMES = ['light_theme_colors', 'dark_theme_colors'];
+// these section names, and marker fields under 'visited_marker'/
+// 'unvisited_marker' (back when they were an expandable block inside
+// FORM_SCHEMA) — still unwrap them on read.
+const LEGACY_SECTION_NAMES = ['light_theme_colors', 'dark_theme_colors', 'visited_marker', 'unvisited_marker'];
 const ALL_SECTION_NAMES = [...SECTION_NAMES, ...LEGACY_SECTION_NAMES];
 
 // The complete flat default for every form option, given a flat config
@@ -1009,11 +1023,17 @@ class NPSParksCardEditor extends HTMLElement {
     set hass(hass) {
         this._hass = hass;
         if (this._form) this._form.hass = hass;
+        if (this._markerForms) {
+            for (const group of MARKER_GROUPS) this._markerForms[group.key].hass = hass;
+        }
     }
 
     _render() {
         if (!this._built) this._build();
-        if (this._hass) this._form.hass = this._hass;
+        if (this._hass) {
+            this._form.hass = this._hass;
+            for (const group of MARKER_GROUPS) this._markerForms[group.key].hass = this._hass;
+        }
 
         const flat = flattenConfig(this._config);
         const merged = { ...optionDefaults(flat) };
@@ -1023,15 +1043,25 @@ class NPSParksCardEditor extends HTMLElement {
             }
         }
 
-        // ha-form data: form-managed options only, nested into sections
+        // Main ha-form data: only the fields it owns, nested into sections
         const data = {};
-        for (const key of Object.keys(OPTION_SECTION)) {
+        for (const key of MAIN_FORM_KEYS) {
             const section = OPTION_SECTION[key];
             if (section) (data[section] = data[section] || {})[key] = merged[key];
             else data[key] = merged[key];
         }
         this._form.schema = FORM_SCHEMA;
         this._form.data = data;
+
+        // Each marker group's own dedicated ha-form (icon/size/opacity for
+        // that state) — flat data, not nested under any section.
+        for (const group of MARKER_GROUPS) {
+            const gdata = {};
+            for (const field of group.fields) gdata[field.name] = merged[field.name];
+            const form = this._markerForms[group.key];
+            form.schema = group.fields;
+            form.data = gdata;
+        }
 
         // Color rows: show the merged (default-aware) value. <input
         // type="color"> needs a #rrggbb string; fall back to black only if
@@ -1045,6 +1075,7 @@ class NPSParksCardEditor extends HTMLElement {
     _build() {
         this._built = true;
         this._colorInputs = {};
+        this._markerForms = {};
 
         const style = document.createElement('style');
         style.textContent = `
@@ -1078,6 +1109,31 @@ class NPSParksCardEditor extends HTMLElement {
         });
         this.appendChild(this._form);
 
+        for (const group of MARKER_GROUPS) {
+            const panel = document.createElement('ha-expansion-panel');
+            panel.className = 'nps-color-group';
+            panel.outlined = true;
+            panel.header = group.title;
+
+            const form = document.createElement('ha-form');
+            form.computeLabel = schema =>
+                schema.title ||
+                (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, ' ');
+            form.addEventListener('value-changed', ev => {
+                ev.stopPropagation();
+                this._markerFormChanged(group, ev.detail.value);
+            });
+            panel.appendChild(form);
+            this._markerForms[group.key] = form;
+
+            const rows = document.createElement('div');
+            rows.className = 'nps-color-rows';
+            rows.appendChild(this._buildColorRow(group.colorKey, group.colorLabel));
+            panel.appendChild(rows);
+
+            this.appendChild(panel);
+        }
+
         for (const group of COLOR_GROUPS) {
             const panel = document.createElement('ha-expansion-panel');
             panel.className = 'nps-color-group';
@@ -1086,25 +1142,30 @@ class NPSParksCardEditor extends HTMLElement {
 
             const rows = document.createElement('div');
             rows.className = 'nps-color-rows';
-            for (const [key, label] of group.keys) {
-                const row = document.createElement('div');
-                row.className = 'nps-color-row';
-
-                const labelEl = document.createElement('label');
-                labelEl.textContent = label;
-
-                const input = document.createElement('input');
-                input.type = 'color';
-                input.addEventListener('input', e => this._colorChanged(key, e.target.value));
-
-                row.appendChild(labelEl);
-                row.appendChild(input);
-                rows.appendChild(row);
-                this._colorInputs[key] = input;
-            }
+            for (const [key, label] of group.keys) rows.appendChild(this._buildColorRow(key, label));
             panel.appendChild(rows);
             this.appendChild(panel);
         }
+    }
+
+    // Builds one label-left / swatch-right color row and registers its
+    // input in this._colorInputs, keyed by option name (shared by both
+    // MARKER_GROUPS and COLOR_GROUPS panels).
+    _buildColorRow(key, label) {
+        const row = document.createElement('div');
+        row.className = 'nps-color-row';
+
+        const labelEl = document.createElement('label');
+        labelEl.textContent = label;
+
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.addEventListener('input', e => this._colorChanged(key, e.target.value));
+
+        row.appendChild(labelEl);
+        row.appendChild(input);
+        this._colorInputs[key] = input;
+        return row;
     }
 
     // ha-form fired: fold its (nested) values into the flat working config.
@@ -1113,7 +1174,21 @@ class NPSParksCardEditor extends HTMLElement {
     _formChanged(value) {
         const formFlat = flattenConfig(value);
         const flat = flattenConfig(this._config);
-        for (const key of Object.keys(OPTION_SECTION)) {
+        for (const key of MAIN_FORM_KEYS) {
+            if (formFlat[key] === undefined) delete flat[key];
+            else flat[key] = formFlat[key];
+        }
+        this._commit(flat);
+    }
+
+    // Same as _formChanged, but scoped to one marker group's own fields —
+    // each marker panel has its own ha-form instance, so a change in one
+    // must not be read as "everything else was cleared".
+    _markerFormChanged(group, value) {
+        const formFlat = flattenConfig(value);
+        const flat = flattenConfig(this._config);
+        for (const field of group.fields) {
+            const key = field.name;
             if (formFlat[key] === undefined) delete flat[key];
             else flat[key] = formFlat[key];
         }

@@ -4482,24 +4482,26 @@ var FORM_SCHEMA = [
   {
     name: "show_background",
     selector: { boolean: {} }
-  },
+  }
+];
+var MARKER_GROUPS = [
   {
-    type: "expandable",
-    name: "visited_marker",
+    key: "visited",
     title: "Visited marker",
-    icon: "mdi:map-marker-check",
-    schema: [
+    colorKey: "visited_color",
+    colorLabel: "Marker color",
+    fields: [
       { name: "visited_icon", selector: { icon: {} } },
       { name: "visited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
       { name: "visited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } }
     ]
   },
   {
-    type: "expandable",
-    name: "unvisited_marker",
+    key: "unvisited",
     title: "Unvisited marker",
-    icon: "mdi:map-marker-outline",
-    schema: [
+    colorKey: "unvisited_color",
+    colorLabel: "Marker color",
+    fields: [
       { name: "unvisited_icon", selector: { icon: {} } },
       { name: "unvisited_marker_size", selector: { number: { min: 4, max: 40, mode: "slider" } } },
       { name: "unvisited_opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } }
@@ -4524,13 +4526,6 @@ var COLOR_GROUPS = [
       ["dark_border_color", "State borders"],
       ["dark_coastline_color", "Coastline"]
     ]
-  },
-  {
-    title: "Marker colors",
-    keys: [
-      ["visited_color", "Visited"],
-      ["unvisited_color", "Unvisited"]
-    ]
   }
 ];
 var OPTION_SECTION = {};
@@ -4540,8 +4535,12 @@ var OPTION_SECTION = {};
     else OPTION_SECTION[item.name] = parent || null;
   }
 })(FORM_SCHEMA, null);
+var MAIN_FORM_KEYS = Object.keys(OPTION_SECTION);
+for (const group of MARKER_GROUPS) {
+  for (const field of group.fields) OPTION_SECTION[field.name] = null;
+}
 var SECTION_NAMES = [...new Set(Object.values(OPTION_SECTION).filter(Boolean))];
-var LEGACY_SECTION_NAMES = ["light_theme_colors", "dark_theme_colors"];
+var LEGACY_SECTION_NAMES = ["light_theme_colors", "dark_theme_colors", "visited_marker", "unvisited_marker"];
 var ALL_SECTION_NAMES = [...SECTION_NAMES, ...LEGACY_SECTION_NAMES];
 function optionDefaults(flat) {
   const preset = PRESETS[flat.color_preset] || PRESETS[DEFAULT_PRESET];
@@ -5179,10 +5178,16 @@ var NPSParksCardEditor = class extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._form) this._form.hass = hass;
+    if (this._markerForms) {
+      for (const group of MARKER_GROUPS) this._markerForms[group.key].hass = hass;
+    }
   }
   _render() {
     if (!this._built) this._build();
-    if (this._hass) this._form.hass = this._hass;
+    if (this._hass) {
+      this._form.hass = this._hass;
+      for (const group of MARKER_GROUPS) this._markerForms[group.key].hass = this._hass;
+    }
     const flat = flattenConfig(this._config);
     const merged = { ...optionDefaults(flat) };
     for (const key of Object.keys(merged)) {
@@ -5191,13 +5196,20 @@ var NPSParksCardEditor = class extends HTMLElement {
       }
     }
     const data = {};
-    for (const key of Object.keys(OPTION_SECTION)) {
+    for (const key of MAIN_FORM_KEYS) {
       const section = OPTION_SECTION[key];
       if (section) (data[section] = data[section] || {})[key] = merged[key];
       else data[key] = merged[key];
     }
     this._form.schema = FORM_SCHEMA;
     this._form.data = data;
+    for (const group of MARKER_GROUPS) {
+      const gdata = {};
+      for (const field of group.fields) gdata[field.name] = merged[field.name];
+      const form = this._markerForms[group.key];
+      form.schema = group.fields;
+      form.data = gdata;
+    }
     for (const [key, input] of Object.entries(this._colorInputs)) {
       const v = merged[key];
       input.value = typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : "#000000";
@@ -5206,6 +5218,7 @@ var NPSParksCardEditor = class extends HTMLElement {
   _build() {
     this._built = true;
     this._colorInputs = {};
+    this._markerForms = {};
     const style = document.createElement("style");
     style.textContent = `
             .nps-color-group { margin-top: 12px; }
@@ -5234,6 +5247,25 @@ var NPSParksCardEditor = class extends HTMLElement {
       this._formChanged(ev.detail.value);
     });
     this.appendChild(this._form);
+    for (const group of MARKER_GROUPS) {
+      const panel = document.createElement("ha-expansion-panel");
+      panel.className = "nps-color-group";
+      panel.outlined = true;
+      panel.header = group.title;
+      const form = document.createElement("ha-form");
+      form.computeLabel = (schema) => schema.title || (schema.name.charAt(0).toUpperCase() + schema.name.slice(1)).replace(/_/g, " ");
+      form.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        this._markerFormChanged(group, ev.detail.value);
+      });
+      panel.appendChild(form);
+      this._markerForms[group.key] = form;
+      const rows = document.createElement("div");
+      rows.className = "nps-color-rows";
+      rows.appendChild(this._buildColorRow(group.colorKey, group.colorLabel));
+      panel.appendChild(rows);
+      this.appendChild(panel);
+    }
     for (const group of COLOR_GROUPS) {
       const panel = document.createElement("ha-expansion-panel");
       panel.className = "nps-color-group";
@@ -5241,22 +5273,26 @@ var NPSParksCardEditor = class extends HTMLElement {
       panel.header = group.title;
       const rows = document.createElement("div");
       rows.className = "nps-color-rows";
-      for (const [key, label] of group.keys) {
-        const row = document.createElement("div");
-        row.className = "nps-color-row";
-        const labelEl = document.createElement("label");
-        labelEl.textContent = label;
-        const input = document.createElement("input");
-        input.type = "color";
-        input.addEventListener("input", (e) => this._colorChanged(key, e.target.value));
-        row.appendChild(labelEl);
-        row.appendChild(input);
-        rows.appendChild(row);
-        this._colorInputs[key] = input;
-      }
+      for (const [key, label] of group.keys) rows.appendChild(this._buildColorRow(key, label));
       panel.appendChild(rows);
       this.appendChild(panel);
     }
+  }
+  // Builds one label-left / swatch-right color row and registers its
+  // input in this._colorInputs, keyed by option name (shared by both
+  // MARKER_GROUPS and COLOR_GROUPS panels).
+  _buildColorRow(key, label) {
+    const row = document.createElement("div");
+    row.className = "nps-color-row";
+    const labelEl = document.createElement("label");
+    labelEl.textContent = label;
+    const input = document.createElement("input");
+    input.type = "color";
+    input.addEventListener("input", (e) => this._colorChanged(key, e.target.value));
+    row.appendChild(labelEl);
+    row.appendChild(input);
+    this._colorInputs[key] = input;
+    return row;
   }
   // ha-form fired: fold its (nested) values into the flat working config.
   // Take form-managed keys from the form verbatim — including cleared
@@ -5264,7 +5300,20 @@ var NPSParksCardEditor = class extends HTMLElement {
   _formChanged(value) {
     const formFlat = flattenConfig(value);
     const flat = flattenConfig(this._config);
-    for (const key of Object.keys(OPTION_SECTION)) {
+    for (const key of MAIN_FORM_KEYS) {
+      if (formFlat[key] === void 0) delete flat[key];
+      else flat[key] = formFlat[key];
+    }
+    this._commit(flat);
+  }
+  // Same as _formChanged, but scoped to one marker group's own fields —
+  // each marker panel has its own ha-form instance, so a change in one
+  // must not be read as "everything else was cleared".
+  _markerFormChanged(group, value) {
+    const formFlat = flattenConfig(value);
+    const flat = flattenConfig(this._config);
+    for (const field of group.fields) {
+      const key = field.name;
       if (formFlat[key] === void 0) delete flat[key];
       else flat[key] = formFlat[key];
     }
