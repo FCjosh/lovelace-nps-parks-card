@@ -204,7 +204,7 @@ function optionDefaults(flat) {
         dark_land_color: preset.dark.land,
         dark_border_color: preset.dark.border,
         dark_coastline_color: preset.dark.coastline,
-        visited_icon: null,
+        visited_icon: 'mdi:pine-tree',
         visited_marker_size: legacySize,
         visited_opacity: 1.0,
         visited_color: '#2D6A4F',
@@ -291,7 +291,7 @@ class NPSParksCard extends HTMLElement {
             unvisited_opacity: 0.75,
             visited_marker_size: defaultSize,
             unvisited_marker_size: defaultSize,
-            visited_icon: null,    // e.g. 'mdi:pine-tree' — null = plain dot
+            visited_icon: 'mdi:pine-tree',
             unvisited_icon: null,  // e.g. 'mdi:circle-outline' — null = plain dot
 
             // Which color set to render with. 'auto' follows Home
